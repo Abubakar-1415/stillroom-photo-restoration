@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101419">
+  <title>Stillroom — AI Photo Restoration</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #101419;
+      --surface: #171d23;
+      --line: rgba(226, 232, 236, .1);
+      --muted: #929da5;
+      --text: #f1f0e9;
+      --accent: #c9aa75;
+      --accent-light: #e4c998;
+      --success: #91b49c;
+      --danger: #e49b91;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-width: 320px;
+      margin: 0;
+      color: var(--text);
+      background: radial-gradient(ellipse at 50% -18%, rgba(109, 128, 137, .18), transparent 45%), var(--canvas);
+    }
+    button, input { font: inherit; }
+    .shell { width: min(1040px, calc(100% - 40px)); margin: 0 auto; }
+    .topbar { height: 72px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid rgba(201, 170, 117, .55); border-radius: 11px; color: var(--accent-light); font-size: 17px; }
+    .brand-name { font-size: 13px; font-weight: 650; letter-spacing: .13em; }
+    .brand-sub { margin-top: 3px; color: var(--muted); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+    .device-badge { padding: 8px 11px; border: 1px solid var(--line); border-radius: 99px; color: #c5cdc9; font-size: 10px; }
+    .device-badge::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--success); }
+    main { padding: 48px 0 58px; }
+    .intro { max-width: 690px; margin: 0 auto 30px; text-align: center; }
+    .eyebrow { color: var(--accent-light); font-size: 10px; font-weight: 650; letter-spacing: .2em; text-transform: uppercase; }
+    h1 { margin: 13px 0 12px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(38px, 6vw, 58px); font-weight: 400; letter-spacing: -.045em; line-height: 1.06; }
+    h1 span { color: var(--accent-light); font-style: italic; }
+    .intro p { margin: 0; color: #a7afb3; font-size: 13px; line-height: 1.7; }
+    .panel { overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: rgba(23, 29, 35, .9); }
+    .panel-head { min-height: 52px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+    .panel-title { font-size: 11px; font-weight: 620; }
+    .muted { color: var(--muted); font-size: 10px; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 15px; align-items: start; }
+    .previews { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
+    .preview { min-width: 0; background: #14191e; }
+    .preview-label { min-height: 40px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; color: #c6ccca; font-size: 10px; }
+    .preview-label span:last-child { color: var(--muted); font-size: 9px; }
+    .image-stage { min-height: 270px; padding: 10px; display: grid; place-items: center; }
+    .image-stage img { display: block; max-width: 100%; max-height: 365px; border-radius: 7px; object-fit: contain; }
+    .placeholder { min-height: 245px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--muted); }
+    .placeholder-icon { width: 42px; height: 42px; margin-bottom: 12px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 13px; color: var(--accent-light); font-size: 18px; }
+    .placeholder-title { color: #d5d8d5; font-size: 11px; }
+    .placeholder-copy { max-width: 175px; margin-top: 6px; font-size: 10px; line-height: 1.55; }
+    .drop-zone { margin: 12px; padding: 13px 14px; display: flex; align-items: center; gap: 11px; border: 1px dashed rgba(201, 170, 117, .4); border-radius: 10px; background: rgba(201, 170, 117, .035); cursor: pointer; transition: .18s; }
+    .drop-zone:hover, .drop-zone.over { border-color: var(--accent-light); background: rgba(201, 170, 117, .09); }
+    .upload-icon { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 9px; background: rgba(201, 170, 117, .11); color: var(--accent-light); }
+    .upload-copy { min-width: 0; flex: 1; }
+    .upload-copy strong { display: block; overflow: hidden; color: #e4e4df; font-size: 10px; font-weight: 580; text-overflow: ellipsis; white-space: nowrap; }
+    .upload-copy span, .browse { margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .browse { color: var(--accent-light); white-space: nowrap; }
+    .settings { padding: 15px; }
+    .setting + .setting { margin-top: 22px; }
+    .setting-top { display: flex; align-items: center; justify-content: space-between; }
+    .setting-label { color: #e0e1dc; font-size: 10px; font-weight: 560; }
+    output { color: var(--accent-light); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .hint { margin-top: 6px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+    input[type="range"] { width: 100%; height: 3px; margin: 14px 0 5px; display: block; accent-color: var(--accent); cursor: pointer; }
+    .range-labels { display: flex; justify-content: space-between; color: #78828a; font-size: 8px; }
+    .divider { height: 1px; margin: 19px 0; background: var(--line); }
+    .restore { width: 100%; min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 8px; background: var(--accent); color: #181813; font-size: 10px; font-weight: 680; cursor: pointer; transition: .18s; }
+    .restore:hover:not(:disabled) { background: var(--accent-light); transform: translateY(-1px); }
+    .restore:disabled { opacity: .42; cursor: not-allowed; }
+    .status { min-height: 36px; padding-top: 11px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .status.error { color: var(--danger); }
+    .status.success { color: var(--success); }
+    .privacy { display: flex; gap: 7px; color: #87918f; font-size: 9px; line-height: 1.55; }
+    .privacy span:first-child { color: var(--success); }
+    .result-bar { min-height: 54px; padding: 9px 13px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); }
+    .result-info { color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .download { padding: 8px 10px; border: 1px solid rgba(201, 170, 117, .44); border-radius: 7px; color: var(--accent-light); text-decoration: none; font-size: 9px; white-space: nowrap; }
+    .download:hover { background: rgba(201, 170, 117, .08); }
+    footer { margin-top: 19px; display: flex; justify-content: center; gap: 9px; color: #747e84; font-size: 9px; }
+    footer span + span::before { content: "·"; margin-right: 9px; color: #586168; }
+    [hidden] { display: none !important; }
+    @media(max-width: 720px) { .shell { width: min(100% - 26px, 560px); } main { padding-top: 36px; } .workspace { grid-template-columns: 1fr; } .image-stage { min-height: 205px; } .placeholder { min-height: 180px; } }
+    @media(max-width: 460px) { .shell { width: calc(100% - 20px); } .topbar { height: 62px; } .device-badge { padding: 7px 8px; font-size: 8px; } .intro p { font-size: 11px; } .previews { grid-template-columns: 1fr; } .image-stage { min-height: 175px; } .placeholder { min-height: 150px; } footer { flex-wrap: wrap; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark" aria-hidden="true">✳</div><div><div class="brand-name">STILLROOM</div><div class="brand-sub">Photo restoration studio</div></div></div>
+      <div class="device-badge">AI runs in your browser</div>
+    </header>
+    <main>
+      <section class="intro">
+        <div class="eyebrow">A second life for your photographs</div>
+        <h1>Bring the details <span>back.</span></h1>
+        <p>Upscale an old or soft photograph with Real-ESRGAN. Your original stays untouched; choose how much AI detail to blend into your result.</p>
+      </section>
+      <section class="workspace" aria-label="Photo restoration workspace">
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Image workspace</div><div class="muted">Original &nbsp; / &nbsp; Restored</div></div>
+          <div class="previews">
+            <div class="preview">
+              <div class="preview-label"><span>Original</span><span id="original-size">Waiting for image</span></div>
+              <div class="image-stage" id="original-stage">
+                <div class="placeholder" id="original-placeholder"><div class="placeholder-icon">◇</div><div class="placeholder-title">Your photograph begins here</div><div class="placeholder-copy">Choose an image below to see it in the workspace.</div></div>
+                <img id="original-image" alt="Original photo" hidden>
+              </div>
+            </div>
+            <div class="preview">
+              <div class="preview-label"><span>Restored</span><span id="result-size">Your finished image</span></div>
+              <div class="image-stage">
+                <div class="placeholder" id="result-placeholder"><div class="placeholder-icon">✧</div><div class="placeholder-title">Clarity, carefully restored</div><div class="placeholder-copy">Your finished photograph will appear here, ready to save.</div></div>
+                <img id="result-image" alt="Restored photo" hidden>
+              </div>
+            </div>
+          </div>
+          <label class="drop-zone" id="drop-zone" for="file-input">
+            <span class="upload-icon" aria-hidden="true">↑</span>
+            <span class="upload-copy"><strong id="upload-name">Choose a photo or drop it here</strong><span>JPG, PNG or WEBP · stays on your device</span></span>
+            <span class="browse">Browse files</span>
+          </label>
+          <input id="file-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+          <div class="result-bar"><div class="result-info" id="result-info">Your original is never changed. Download the result as a high-resolution PNG.</div><a class="download" id="download" href="#" download="stillroom-restored.png" hidden>↓ &nbsp; Download PNG</a></div>
+        </div>
+        <aside class="panel">
+          <div class="panel-head"><div class="panel-title">Restoration settings</div><div class="muted">Fine tune</div></div>
+          <div class="settings">
+            <div class="setting">
+              <div class="setting-top"><label class="setting-label" for="strength">AI detail blend</label><output id="strength-value" for="strength">25%</output></div>
+              <div class="hint">At 0%, only conventional upscaling is used. Increase gradually to blend in AI-estimated detail.</div>
+              <input id="strength" type="range" min="0" max="100" value="25">
+              <div class="range-labels"><span>Original-only upscale</span><span>More AI detail</span></div>
+            </div>
+            <div class="divider"></div>
+            <button class="restore" id="restore" type="button" disabled><span id="button-icon">✧</span><span id="button-label">Choose a photo to begin</span></button>
+            <div class="status" id="status" role="status" aria-live="polite">Select a photo to prepare your restoration.</div>
+            <div class="divider"></div>
+            <div class="privacy"><span aria-hidden="true">✓</span><span>Images are processed in this browser and are not uploaded to a server. AI can only estimate details missing from a blurry original.</span></div>
+          </div>
+        </aside>
+      </section>
+      <footer><span>Real-ESRGAN ×4 upscaling</span><span>Adjustable original blend</span><span>PNG export</span></footer>
+    </main>
+  </div>
+  <script type="module">
+    import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.webgpu.bundle.min.mjs";
+
+    const MODEL_URL = new URL("./models/RealESRGAN_x4plus.onnx", import.meta.url);
+    const SCALE = 4;
+    const TILE_SIZE = 256;
+    const TILE_PAD = 10;
+    const MAX_IMAGE_PIXELS = 1_500_000;
+    const input = document.getElementById("file-input");
+    const dropZone = document.getElementById("drop-zone");
+    const originalImage = document.getElementById("original-image");
+    const resultImage = document.getElementById("result-image");
+    const restoreButton = document.getElementById("restore");
+    const status = document.getElementById("status");
+    const download = document.getElementById("download");
+    let selectedBitmap = null;
+    let selectedFilename = "photo";
+    let selectedUrl = null;
+    let resultUrl = null;
+    let sessionPromise = null;
+
+    function setStatus(message, kind = "") {
+      status.textContent = message;
+      status.className = `status ${kind}`.trim();
+    }
+
+    function showDimensions(image, target) {
+      target.textContent = `${image.naturalWidth.toLocaleString()} × ${image.naturalHeight.toLocaleString()} px`;
+    }
+
+    function resetResult() {
+      resultImage.hidden = true;
+      document.getElementById("result-placeholder").hidden = false;
+      document.getElementById("result-size").textContent = "Your finished image";
+      document.getElementById("result-info").textContent = "Your original is never changed. Download the result as a high-resolution PNG.";
+      download.hidden = true;
+      if (resultUrl) {
+        URL.revokeObjectURL(resultUrl);
+        resultUrl = null;
+      }
+    }
+
+    async function chooseFile(file) {
+      if (!file) return;
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+        setStatus("Please choose a JPG, PNG or WEBP image.", "error");
+        return;
+      }
+      let bitmap;
+      try {
+        bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+      } catch (error) {
+        setStatus(`Could not open this image: ${error.message}`, "error");
+        return;
+      }
+      if (bitmap.width * bitmap.height > MAX_IMAGE_PIXELS) {
+        bitmap.close();
+        setStatus("This photo is very large. Please choose an image under 1.5 megapixels for reliable browser processing.", "error");
+        return;
+      }
+      if (selectedBitmap) selectedBitmap.close();
+      selectedBitmap = bitmap;
+      selectedFilename = file.name.replace(/\.[^.]+$/, "") || "photo";
+      if (selectedUrl) URL.revokeObjectURL(selectedUrl);
+      selectedUrl = URL.createObjectURL(file);
+      originalImage.src = selectedUrl;
+      originalImage.hidden = false;
+      document.getElementById("original-placeholder").hidden = true;
+      document.getElementById("original-size").textContent = `${bitmap.width.toLocaleString()} × ${bitmap.height.toLocaleString()} px`;
+      document.getElementById("upload-name").textContent = file.name;
+      restoreButton.disabled = false;
+      document.getElementById("button-label").textContent = "Restore my photograph";
+      resetResult();
+      setStatus("Image ready. The balanced default favors your original.");
+    }
+
+    async function loadModel() {
+      if (!sessionPromise) {
+        sessionPromise = (async () => {
+          setStatus("Loading the AI model into your browser for the first time…");
+          const response = await fetch(MODEL_URL);
+          if (!response.ok) throw new Error(`The AI model could not be downloaded (${response.status}).`);
+          const bytes = await response.arrayBuffer();
+          const model = new Uint8Array(bytes);
+          const options = { graphOptimizationLevel: "all" };
+          if ("gpu" in navigator) {
+            try {
+              const session = await ort.InferenceSession.create(model, {
+                ...options,
+                executionProviders: ["webgpu"],
+              });
+              return { session, device: "WebGPU" };
+            } catch (error) {
+              console.warn("WebGPU unavailable; using browser CPU inference.", error);
+            }
+          }
+          const session = await ort.InferenceSession.create(model, {
+            ...options,
+            executionProviders: ["wasm"],
+          });
+          return { session, device: "browser CPU" };
+        })().catch(error => {
+          sessionPromise = null;
+          throw error;
+        });
+      }
+      return sessionPromise;
+    }
+
+    function makeTensor(bitmap, left, top, right, bottom) {
+      const width = right - left;
+      const height = bottom - top;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      context.drawImage(bitmap, left, top, width, height, 0, 0, width, height);
+      const rgba = context.getImageData(0, 0, width, height).data;
+      const planeSize = width * height;
+      const chw = new Float32Array(planeSize * 3);
+      for (let pixel = 0; pixel < planeSize; pixel++) {
+        chw[pixel] = rgba[pixel * 4] / 255;
+        chw[planeSize + pixel] = rgba[pixel * 4 + 1] / 255;
+        chw[planeSize * 2 + pixel] = rgba[pixel * 4 + 2] / 255;
+      }
+      return new ort.Tensor("float32", chw, [1, 3, height, width]);
+    }
+
+    async function upscale(bitmap, model, progress) {
+      const width = bitmap.width;
+      const height = bitmap.height;
+      const outputWidth = width * SCALE;
+      const outputHeight = height * SCALE;
+      const output = new Uint8ClampedArray(outputWidth * outputHeight * 4);
+      const tilesX = Math.ceil(width / TILE_SIZE);
+      const tilesY = Math.ceil(height / TILE_SIZE);
+      let completed = 0;
+
+      for (let coreTop = 0; coreTop < height; coreTop += TILE_SIZE) {
+        for (let coreLeft = 0; coreLeft < width; coreLeft += TILE_SIZE) {
+          const coreRight = Math.min(coreLeft + TILE_SIZE, width);
+          const coreBottom = Math.min(coreTop + TILE_SIZE, height);
+          const tileLeft = Math.max(0, coreLeft - TILE_PAD);
+          const tileTop = Math.max(0, coreTop - TILE_PAD);
+          const tileRight = Math.min(width, coreRight + TILE_PAD);
+          const tileBottom = Math.min(height, coreBottom + TILE_PAD);
+          const tensor = makeTensor(bitmap, tileLeft, tileTop, tileRight, tileBottom);
+          const feeds = { [model.inputNames[0]]: tensor };
+          const result = await model.run(feeds);
+          const dimensions = result[model.outputNames[0]].dims;
+          const shape = dimensions.length === 4 ? dimensions.slice(1) : dimensions;
+          if (shape.length !== 3 || shape[0] !== 3) {
+            throw new Error(`Unexpected AI model output shape: ${dimensions.join(" × ")}`);
+          }
+          const [channels, tileOutputHeight, tileOutputWidth] = shape;
+          const values = result[model.outputNames[0]].data;
+          if (tileOutputWidth !== (tileRight - tileLeft) * SCALE || tileOutputHeight !== (tileBottom - tileTop) * SCALE) {
+            throw new Error("The AI model returned an unexpected image size.");
+          }
+          const cropLeft = (coreLeft - tileLeft) * SCALE;
+          const cropTop = (coreTop - tileTop) * SCALE;
+          const writeLeft = coreLeft * SCALE;
+          const writeTop = coreTop * SCALE;
+          const writeWidth = (coreRight - coreLeft) * SCALE;
+          const writeHeight = (coreBottom - coreTop) * SCALE;
+          const planeSize = tileOutputWidth * tileOutputHeight;
+
+          for (let y = 0; y < writeHeight; y++) {
+            const sourceRow = (cropTop + y) * tileOutputWidth + cropLeft;
+            const destinationRow = (writeTop + y) * outputWidth + writeLeft;
+            for (let x = 0; x < writeWidth; x++) {
+              const sourcePixel = sourceRow + x;
+              const destinationPixel = (destinationRow + x) * 4;
+              output[destinationPixel] = Math.round(Math.min(1, Math.max(0, values[sourcePixel])) * 255);
+              output[destinationPixel + 1] = Math.round(Math.min(1, Math.max(0, values[planeSize + sourcePixel])) * 255);
+              output[destinationPixel + 2] = Math.round(Math.min(1, Math.max(0, values[planeSize * 2 + sourcePixel])) * 255);
+              output[destinationPixel + 3] = 255;
+            }
+          }
+          completed++;
+          progress(Math.round((completed / (tilesX * tilesY)) * 100));
+        }
+      }
+      return { data: output, width: outputWidth, height: outputHeight };
+    }
+
+    function makeOriginalUpscale(bitmap, width, height) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(bitmap, 0, 0, width, height);
+      return context.getImageData(0, 0, width, height);
+    }
+
+    async function restorePhoto(bitmap, blendPercent) {
+      const outputWidth = bitmap.width * SCALE;
+      const outputHeight = bitmap.height * SCALE;
+      const original = makeOriginalUpscale(bitmap, outputWidth, outputHeight);
+      if (blendPercent === 0) return original;
+      const model = await loadModel();
+      const ai = await upscale(bitmap, model.session, percent => {
+        setStatus(`Running on ${model.device} · ${percent}% complete`);
+      });
+      const blend = blendPercent / 100;
+      for (let pixel = 0; pixel < original.data.length; pixel += 4) {
+        for (let channel = 0; channel < 3; channel++) {
+          original.data[pixel + channel] = Math.round(
+            original.data[pixel + channel] * (1 - blend) + ai.data[pixel + channel] * blend
+          );
+        }
+      }
+      return original;
+    }
+
+    input.addEventListener("change", () => chooseFile(input.files[0]));
+    for (const eventName of ["dragenter", "dragover"]) {
+      dropZone.addEventListener(eventName, event => {
+        event.preventDefault();
+        dropZone.classList.add("over");
+      });
+    }
+    for (const eventName of ["dragleave", "drop"]) {
+      dropZone.addEventListener(eventName, event => {
+        event.preventDefault();
+        dropZone.classList.remove("over");
+      });
+    }
+    dropZone.addEventListener("drop", event => chooseFile(event.dataTransfer.files[0]));
+    document.getElementById("strength").addEventListener("input", event => {
+      document.getElementById("strength-value").textContent = `${event.target.value}%`;
+    });
+
+    restoreButton.addEventListener("click", async () => {
+      if (!selectedBitmap) return;
+      restoreButton.disabled = true;
+      document.getElementById("button-label").textContent = "Restoring photograph…";
+      setStatus("Preparing a high-resolution version of your photo…");
+      try {
+        const result = await restorePhoto(selectedBitmap, Number(document.getElementById("strength").value));
+        const canvas = document.createElement("canvas");
+        canvas.width = selectedBitmap.width * SCALE;
+        canvas.height = selectedBitmap.height * SCALE;
+        canvas.getContext("2d").putImageData(result, 0, 0);
+        const blob = await new Promise((resolve, reject) => {
+          canvas.toBlob(value => value ? resolve(value) : reject(new Error("Could not encode the restored image.")), "image/png");
+        });
+        if (resultUrl) URL.revokeObjectURL(resultUrl);
+        resultUrl = URL.createObjectURL(blob);
+        resultImage.src = resultUrl;
+        resultImage.hidden = false;
+        document.getElementById("result-placeholder").hidden = true;
+        document.getElementById("result-size").textContent = `${canvas.width.toLocaleString()} × ${canvas.height.toLocaleString()} px`;
+        download.href = resultUrl;
+        download.download = `${selectedFilename}-restored.png`;
+        download.hidden = false;
+        const blend = Number(document.getElementById("strength").value);
+        document.getElementById("result-info").textContent = blend === 0
+          ? "Original-only upscale · no AI-generated detail"
+          : `${blend}% AI detail blended with the upscaled original`;
+        setStatus("Your restored photo is ready to download.", "success");
+      } catch (error) {
+        console.error(error);
+        setStatus(error.message || "Could not restore this photo. Please try again.", "error");
+      } finally {
+        restoreButton.disabled = !selectedBitmap;
+        document.getElementById("button-label").textContent = "Restore my photograph";
+      }
+    });
+  </script>
+</body>
+</html>

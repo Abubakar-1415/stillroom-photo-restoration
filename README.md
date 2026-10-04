@@ -3,60 +3,52 @@ title: Stillroom Photo Restoration
 emoji: ✨
 colorFrom: gray
 colorTo: yellow
-sdk: docker
-app_port: 7860
+sdk: static
 ---
 
 # Stillroom — AI Photo Restoration
 
-A small, local-first photo restoration studio. Upload a JPEG, PNG, or WEBP
-image, preview the restored result, and download a high-resolution PNG.
+A browser-based photo restoration studio. Upload a JPEG, PNG, or WEBP image,
+preview a Real-ESRGAN 4× upscale, and download the result as a PNG.
 
-The enhancement pipeline combines Real-ESRGAN upscaling with optional,
-conservative CodeFormer face restoration. AI may estimate fine detail that
-cannot be recovered from a blurry original. Set **AI detail blend** to **0%**
-to skip generative restoration and return a conventional 4× upscale of the
-original.
+The public Hugging Face Space is static, so inference runs in each visitor's
+browser through ONNX Runtime Web and WebGPU when available. Uploaded
+photographs are not sent to an inference server. **AI detail blend** defaults
+to 25% to favor the original. At 0%, the app skips AI inference and performs a
+conventional 4× interpolation of the original. AI enhancement can estimate
+details that are not present in a blurry photograph.
 
-## Run locally on Windows
+## Open the public demo
 
-Python 3.11 is recommended. Install a CPU build of PyTorch, then the app
+Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first AI restoration
+downloads the approximately 64 MB ONNX model into the browser cache; WebGPU is
+used when the browser supports it, otherwise the app falls back to WebAssembly.
+For reliable performance, use an up-to-date desktop browser and photos up to
+1.5 megapixels.
+
+## Run the FastAPI version locally
+
+Python 3.11 is recommended. Install a CPU build of PyTorch and the Python
 dependencies:
 
 ```powershell
 cd "C:\path\to\photo enhancer"
 .\.venv\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-Place the Real-ESRGAN `RealESRGAN_x4plus.pth` checkpoint in `models`, or set
-`REALESRGAN_WEIGHTS` to its path. Make the CodeFormer source checkout available
-in `CodeFormer-src`, or set `CODEFORMER_ROOT` to its path. The CodeFormer
-checkpoint is downloaded by CodeFormer on first use.
-
-Start the app:
-
-```powershell
 .\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8001
 ```
 
-Open <http://127.0.0.1:8001/studio>. If port 8001 is occupied, choose another
-port and use it in the URL.
+Open <http://127.0.0.1:8001/studio>. The FastAPI version uses local
+Real-ESRGAN and CodeFormer checkpoints; set `REALESRGAN_WEIGHTS` and
+`CODEFORMER_ROOT` if they are not at the default paths.
 
-## Deploy on Hugging Face Spaces
+## Public Space model file
 
-1. Create a **public Docker Space** on Hugging Face.
-2. Upload or push this project's tracked files to the Space repository.
-3. Wait for the Docker build and model initialization to finish, then share the
-   Space URL ending in `.hf.space/studio`.
-
-The Docker image downloads the Real-ESRGAN checkpoint during its build. The
-CodeFormer source is cloned from its upstream `v0.1.0` release. CodeFormer
-downloads its own face-restoration checkpoints when face restoration is first
-used. Model checkpoints and local environment files are excluded from this
-project's Git history. Free CPU hosting is suitable for a demo, but image
-restoration may be slow; the first face-restoration request also needs to
-download its model checkpoints.
+`index.html` is the static browser demo. `RealESRGAN_x4plus.onnx` is generated
+from the original Real-ESRGAN checkpoint for browser inference. The ONNX model
+is uploaded to the Hugging Face Space separately; model binaries, local
+environment files, and original checkpoints are excluded from the GitHub
+repository.
 
 ## API
 
