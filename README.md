@@ -14,9 +14,12 @@ preview a Real-ESRGAN 4× upscale, and download the result as a PNG.
 The public Hugging Face Space is static, so inference runs in each visitor's
 browser through ONNX Runtime Web and WebGPU when available. Uploaded
 photographs are not sent to an inference server. **AI detail blend** defaults
-to 25% to favor the original. At 0%, the app skips AI inference and performs a
-conventional 4× interpolation of the original. AI enhancement can estimate
-details that are not present in a blurry photograph.
+to 25% and **Original fidelity** to 98%. Fidelity limits AI color changes
+against the conventional upscale, helping preserve the photo's appearance and
+avoid dramatic invented details. At 0% AI detail blend, inference is skipped
+and the app returns only a conventional 4× interpolation of the original. AI
+enhancement can still estimate details that are not present in a blurry
+photograph.
 
 ## Open the public demo
 

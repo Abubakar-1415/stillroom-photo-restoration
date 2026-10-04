@@ -139,6 +139,12 @@
               <input id="strength" type="range" min="0" max="100" value="25">
               <div class="range-labels"><span>Original-only upscale</span><span>More AI detail</span></div>
             </div>
+            <div class="setting">
+              <div class="setting-top"><label class="setting-label" for="fidelity">Original fidelity</label><output id="fidelity-value" for="fidelity">98%</output></div>
+              <div class="hint">Limits how far AI can change each pixel's color from the original upscale. Higher fidelity keeps your photo closer to its source.</div>
+              <input id="fidelity" type="range" min="0" max="100" value="98">
+              <div class="range-labels"><span>More AI variation</span><span>Faithful</span></div>
+            </div>
             <div class="divider"></div>
             <button class="restore" id="restore" type="button" disabled><span id="button-icon">✧</span><span id="button-label">Choose a photo to begin</span></button>
             <div class="status" id="status" role="status" aria-live="polite">Select a photo to prepare your restoration.</div>
@@ -347,7 +353,7 @@
       return context.getImageData(0, 0, width, height);
     }
 
-    async function restorePhoto(bitmap, blendPercent) {
+    async function restorePhoto(bitmap, blendPercent, fidelityPercent) {
       const outputWidth = bitmap.width * SCALE;
       const outputHeight = bitmap.height * SCALE;
       const original = makeOriginalUpscale(bitmap, outputWidth, outputHeight);
@@ -357,11 +363,17 @@
         setStatus(`Running on ${model.device} · ${percent}% complete`);
       });
       const blend = blendPercent / 100;
+      const fidelity = fidelityPercent / 100;
+      const maxColorChange = Math.round(8 + 247 * (1 - fidelity) ** 2);
       for (let pixel = 0; pixel < original.data.length; pixel += 4) {
         for (let channel = 0; channel < 3; channel++) {
-          original.data[pixel + channel] = Math.round(
-            original.data[pixel + channel] * (1 - blend) + ai.data[pixel + channel] * blend
+          const sourceValue = original.data[pixel + channel];
+          const aiChange = (ai.data[pixel + channel] - sourceValue) * blend;
+          const boundedChange = Math.max(
+            -maxColorChange,
+            Math.min(maxColorChange, aiChange)
           );
+          original.data[pixel + channel] = Math.round(sourceValue + boundedChange);
         }
       }
       return original;
@@ -384,14 +396,19 @@
     document.getElementById("strength").addEventListener("input", event => {
       document.getElementById("strength-value").textContent = `${event.target.value}%`;
     });
+    document.getElementById("fidelity").addEventListener("input", event => {
+      document.getElementById("fidelity-value").textContent = `${event.target.value}%`;
+    });
 
     restoreButton.addEventListener("click", async () => {
       if (!selectedBitmap) return;
+      const blendPercent = Number(document.getElementById("strength").value);
+      const fidelityPercent = Number(document.getElementById("fidelity").value);
       restoreButton.disabled = true;
       document.getElementById("button-label").textContent = "Restoring photograph…";
       setStatus("Preparing a high-resolution version of your photo…");
       try {
-        const result = await restorePhoto(selectedBitmap, Number(document.getElementById("strength").value));
+        const result = await restorePhoto(selectedBitmap, blendPercent, fidelityPercent);
         const canvas = document.createElement("canvas");
         canvas.width = selectedBitmap.width * SCALE;
         canvas.height = selectedBitmap.height * SCALE;
@@ -408,10 +425,9 @@
         download.href = resultUrl;
         download.download = `${selectedFilename}-restored.png`;
         download.hidden = false;
-        const blend = Number(document.getElementById("strength").value);
-        document.getElementById("result-info").textContent = blend === 0
+        document.getElementById("result-info").textContent = blendPercent === 0
           ? "Original-only upscale · no AI-generated detail"
-          : `${blend}% AI detail blended with the upscaled original`;
+          : `${blendPercent}% AI blend · ${fidelityPercent}% original fidelity`;
         setStatus("Your restored photo is ready to download.", "success");
       } catch (error) {
         console.error(error);
