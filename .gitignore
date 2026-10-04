@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.pth
+*.pt
+models/
+CodeFormer/weights/
+CodeFormer-src/
+results/
+app.backup.py
+photo resolution.py

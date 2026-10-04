@@ -1,0 +1,11 @@
+.venv
+__pycache__
+*.py[cod]
+.git
+.env
+CodeFormer
+CodeFormer-src
+models
+results
+app.backup.py
+photo resolution.py
