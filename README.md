@@ -48,6 +48,30 @@ the local Hub cache. A Restormer source checkout is also required:
 git clone --depth 1 https://github.com/swz30/Restormer.git .\Restormer
 ```
 
+### Optional OpenAI image editing
+
+The local studio also offers an optional OpenAI image-editing engine. It is
+disabled unless the backend has an API key. Set the key only in the backend's
+environment (never in `index.html`, browser JavaScript, or a public repository)
+and start the server in that same PowerShell session:
+
+```powershell
+$env:OPENAI_API_KEY = "your-api-key"
+$env:OPENAI_IMAGE_MODEL = "gpt-image-2.5-sunburst"
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8001
+```
+
+The default model can be changed with `OPENAI_IMAGE_MODEL` if your API account
+has access to a different supported image-edit model. In the studio, select
+**OpenAI cloud image edit** and check the explicit consent box before
+processing. The image is sent to OpenAI only after that confirmation; API
+requests may incur charges. OpenAI's API data policy describes possible
+retention for abuse monitoring, so do not upload sensitive photos. Although
+the prompt asks the model to preserve the source faithfully, generative edits
+can change faces or invent details and cannot prove what the camera captured.
+Review the result before downloading. The normal local restoration option
+continues to use this app's server and does not call OpenAI.
+
 ## Public Space model file
 
 The Hugging Face account currently has no free CPU Space quota. The live
@@ -63,7 +87,9 @@ to that host for processing.
 - `GET /health` reports whether the upscaling model has loaded.
 - `POST /enhance` accepts an image and optional `strength`, `fidelity`,
   `denoise_strength`, `deblur`, and `face_recovery` settings; it returns the
-  processed image as PNG. `face_recovery` defaults to false.
+  processed image as PNG. `face_recovery` defaults to false. Set `engine=openai`
+  and `openai_consent=true` to use the optional cloud-edit route; it requires
+  `OPENAI_API_KEY` on the backend.
 
 ## Model and image notes
 

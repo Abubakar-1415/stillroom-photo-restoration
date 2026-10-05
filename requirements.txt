@@ -19,3 +19,4 @@ huggingface_hub>=0.27,<3
 safetensors>=0.4,<1
 einops>=0.7,<1
 lpips
+requests>=2.31,<3

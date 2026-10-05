@@ -3,6 +3,8 @@ import importlib.util
 import os
 import tempfile
 import threading
+import asyncio
+import base64
 from pathlib import Path
 
 import cv2
@@ -19,6 +21,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from realesrgan import RealESRGANer
 from huggingface_hub import hf_hub_download
+import requests
 from safetensors.torch import load_file
 
 
@@ -72,6 +75,11 @@ REALESRGAN_TILE = int(os.environ.get("REALESRGAN_TILE", "256"))
 RESTORMER_REPO_ID = "mlx-community/Restormer-motion-deblurring-fp32"
 RESTORMER_TILE_SIZE = 192
 RESTORMER_TILE_OVERLAP = 32
+OPENAI_IMAGE_MODEL = os.environ.get(
+    "OPENAI_IMAGE_MODEL",
+    "gpt-image-2.5-sunburst",
+)
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
 # ============================================================
@@ -506,6 +514,89 @@ async def health():
     }
 
 
+@app.get("/capabilities")
+async def capabilities():
+    return {
+        "openai_image_edit_available": bool(os.environ.get("OPENAI_API_KEY")),
+        "openai_image_model": OPENAI_IMAGE_MODEL,
+    }
+
+
+class OpenAIConfigurationError(RuntimeError):
+    pass
+
+
+def edit_image_with_openai(
+    image_bytes: bytes,
+    filename: str,
+    content_type: str,
+) -> bytes:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise OpenAIConfigurationError(
+            "OpenAI image editing is not configured. Set OPENAI_API_KEY "
+            "on the backend and restart it."
+        )
+
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/images/edits",
+            headers={"Authorization": f"Bearer {api_key}"},
+            data={
+                "model": OPENAI_IMAGE_MODEL,
+                "prompt": (
+                    "Restore this exact photograph as faithfully as possible. "
+                    "Reduce motion blur and improve natural clarity while "
+                    "preserving the same people, identity, age, facial "
+                    "geometry, expression, pose, clothing, objects, "
+                    "background, lighting, and framing. Do not beautify, "
+                    "redesign, replace, or add objects or facial features. "
+                    "Do not invent fine details that are not supported by "
+                    "the input; when information is missing, keep the result "
+                    "conservative and consistent with the source. Keep a "
+                    "natural photographic look."
+                ),
+                "quality": "high",
+                "output_format": "png",
+                "n": "1",
+            },
+            files={
+                "image": (
+                    filename,
+                    io.BytesIO(image_bytes),
+                    content_type,
+                )
+            },
+            timeout=(15, 300),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        status_code = (
+            exc.response.status_code
+            if exc.response is not None
+            else "network"
+        )
+        raise RuntimeError(
+            f"OpenAI image edit request failed ({status_code})."
+        ) from exc
+    except ValueError as exc:
+        raise RuntimeError("OpenAI returned an invalid response.") from exc
+
+    data = payload.get("data")
+    if not data or not data[0].get("b64_json"):
+        raise RuntimeError("OpenAI returned no edited image.")
+
+    try:
+        result = base64.b64decode(data[0]["b64_json"], validate=True)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("OpenAI returned invalid image data.") from exc
+
+    if not result:
+        raise RuntimeError("OpenAI returned an empty image.")
+    return result
+
+
 # ============================================================
 # ENHANCE ENDPOINT
 # ============================================================
@@ -530,6 +621,8 @@ async def enhance_image(
     ),
     deblur: bool = Form(True),
     face_recovery: bool = Form(False),
+    engine: str = Form("local"),
+    openai_consent: bool = Form(False),
 ):
 
     # --------------------------------------------------------
@@ -572,6 +665,57 @@ async def enhance_image(
         raise HTTPException(
             status_code=400,
             detail="Uploaded file is empty.",
+        )
+
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Image is too large. Choose a file under 20 MB.",
+        )
+
+    if engine not in {"local", "openai"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported restoration engine.",
+        )
+
+    if engine == "openai":
+        if not openai_consent:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Confirm that you want to send this image to OpenAI "
+                    "before using cloud restoration."
+                ),
+            )
+        try:
+            result_bytes = await asyncio.to_thread(
+                edit_image_with_openai,
+                image_bytes,
+                file.filename or "photo",
+                file.content_type,
+            )
+        except OpenAIConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except Exception as exc:
+            print(f"OpenAI image editing failed: {type(exc).__name__}")
+            raise HTTPException(
+                status_code=502,
+                detail="OpenAI image editing failed. Please try again.",
+            ) from exc
+
+        headers = {
+            "X-Restoration-Engine": "openai",
+            "X-Processing-Stages": (
+                f"OpenAI image edit ({OPENAI_IMAGE_MODEL})"
+            ),
+        }
+        return StreamingResponse(
+            io.BytesIO(result_bytes),
+            media_type="image/png",
+            headers=headers,
         )
 
     # --------------------------------------------------------
@@ -844,6 +988,19 @@ STUDIO_HTML = r"""<!doctype html>
           </div>
           <div class="settings">
             <div class="setting">
+              <label class="setting-label" for="engine">Restoration engine</label>
+              <select id="engine" class="engine-select" aria-describedby="engine-note">
+                <option value="local">Local restoration pipeline</option>
+                <option value="openai" id="openai-option" disabled>OpenAI cloud image edit</option>
+              </select>
+              <div class="setting-hint" id="engine-note">Local images stay on this server. OpenAI cloud editing requires a configured API key.</div>
+            </div>
+            <div class="setting" id="openai-consent-setting" hidden>
+              <label class="setting-label"><input id="openai-consent" type="checkbox"> I agree to send this photo to OpenAI for AI editing.</label>
+              <div class="setting-hint">The image will leave this app’s server. OpenAI API image data may be retained for up to 30 days for abuse monitoring. API usage may incur charges. The generated face may differ from the real person; review it before saving.</div>
+            </div>
+            <div id="local-settings">
+            <div class="setting">
               <div class="setting-top">
                 <label class="setting-label" for="strength">AI detail blend</label>
                 <output class="setting-value" id="strength-value" for="strength">100%</output>
@@ -878,13 +1035,14 @@ STUDIO_HTML = r"""<!doctype html>
               <input id="fidelity" type="range" min="0" max="100" value="10">
               <div class="scale-labels"><span>Creative</span><span>Faithful</span></div>
             </div>
+            </div>
             <div class="divider"></div>
             <button class="enhance-button" id="enhance-button" type="button" disabled>
               <span aria-hidden="true">✧</span><span id="button-label">Select a photo to begin</span>
             </button>
             <div class="status" id="status" role="status" aria-live="polite">Choose a photo to prepare your restoration.</div>
             <div class="divider"></div>
-            <div class="privacy"><span aria-hidden="true">!</span><span>Your image is sent to this app's server for AI processing. It is not kept as a permanent upload. Generative face recovery is optional and may change facial details; avoid sensitive photos.</span></div>
+            <div class="privacy"><span aria-hidden="true">!</span><span id="privacy-copy">Your image is sent to this app's server for local AI processing. It is not kept as a permanent upload. Generative face recovery may change facial details; avoid sensitive photos.</span></div>
           </div>
         </aside>
       </section>
@@ -907,9 +1065,49 @@ STUDIO_HTML = r"""<!doctype html>
     const downloadLink = document.getElementById("download-link");
     const faceRecoveryInput = document.getElementById("face-recovery");
     const fidelityInput = document.getElementById("fidelity");
+    const engineInput = document.getElementById("engine");
+    const openAIConsentInput = document.getElementById("openai-consent");
     let selectedFile = null;
     let originalUrl = null;
     let resultUrl = null;
+
+    function updateEngineControls() {
+      const useOpenAI = engineInput.value === "openai";
+      document.getElementById("local-settings").hidden = useOpenAI;
+      document.getElementById("openai-consent-setting").hidden = !useOpenAI;
+      document.getElementById("engine-note").textContent = useOpenAI
+        ? "Cloud edit uses OpenAI’s image model. Your image leaves this server only after you confirm below."
+        : "Local images stay on this server. Noise reduction, motion deblurring, optional face recovery, then upscaling.";
+      document.getElementById("privacy-copy").textContent = useOpenAI
+        ? "After you consent, this app sends your image to OpenAI for editing. API usage may incur charges, and image data may be retained for abuse monitoring. Avoid sensitive photos; generated details may differ from the original."
+        : "Your image is sent to this app's server for local AI processing. It is not kept as a permanent upload. Generative face recovery may change facial details; avoid sensitive photos.";
+      if (selectedFile && (!useOpenAI || openAIConsentInput.checked)) {
+        enhanceButton.disabled = false;
+      } else if (useOpenAI) {
+        enhanceButton.disabled = true;
+      }
+    }
+
+    fetch("/capabilities")
+      .then(response => {
+        if (!response.ok) throw new Error(`Could not load app capabilities (${response.status}).`);
+        return response.json();
+      })
+      .then(data => {
+        document.getElementById("openai-option").disabled = !data.openai_image_edit_available;
+        if (!data.openai_image_edit_available) {
+          document.getElementById("engine-note").textContent =
+            "OpenAI cloud editing is unavailable until OPENAI_API_KEY is configured on the backend.";
+        }
+      })
+      .catch(error => {
+        console.error(error);
+        document.getElementById("engine-note").textContent =
+          "Could not check OpenAI availability. Local restoration is still available.";
+      });
+
+    engineInput.addEventListener("change", updateEngineControls);
+    openAIConsentInput.addEventListener("change", updateEngineControls);
 
     function setStatus(message, kind = "") {
       status.textContent = message;
@@ -945,7 +1143,7 @@ STUDIO_HTML = r"""<!doctype html>
         URL.revokeObjectURL(resultUrl);
         resultUrl = null;
       }
-      enhanceButton.disabled = false;
+      enhanceButton.disabled = engineInput.value === "openai" && !openAIConsentInput.checked;
       document.getElementById("button-label").textContent = "Restore my photograph";
       setStatus("Image ready. Processing sends it to this server for the selected restoration stages.");
     }
@@ -990,10 +1188,14 @@ STUDIO_HTML = r"""<!doctype html>
       data.append("denoise_strength", document.getElementById("denoise").value);
       data.append("deblur", document.getElementById("deblur").checked.toString());
       data.append("face_recovery", document.getElementById("face-recovery").checked.toString());
+      data.append("engine", engineInput.value);
+      data.append("openai_consent", openAIConsentInput.checked.toString());
       enhanceButton.disabled = true;
       document.getElementById("button-label").textContent = "Restoring image…";
       enhanceButton.querySelector("span").className = "button-spinner";
-      setStatus("Reducing noise, deblurring, and upscaling. The first deblur may take longer while the model downloads.");
+      setStatus(engineInput.value === "openai"
+        ? "Sending your photo to OpenAI for generative editing…"
+        : "Reducing noise, deblurring, and upscaling. The first deblur may take longer while the model downloads.");
       try {
         const response = await fetch("/enhance", { method: "POST", body: data });
         if (!response.ok) {
@@ -1024,11 +1226,14 @@ STUDIO_HTML = r"""<!doctype html>
         if (restoration === "success") notes.push("Review reconstructed facial details carefully.");
         if (blur) notes.push(`Input sharpness score ${Number(blur).toFixed(1)}`);
         document.getElementById("result-info").textContent = notes.join(" · ") || "Your restored image is ready to download.";
-        setStatus("Restoration complete. Your high-resolution image is ready.", "success");
+        setStatus(engineInput.value === "openai"
+          ? "OpenAI edit complete. Review the generated image before downloading."
+          : "Restoration complete. Your high-resolution image is ready.", "success");
       } catch (error) {
         setStatus(error.message || "Could not restore this image. Please try again.", "error");
       } finally {
-        enhanceButton.disabled = !selectedFile;
+        enhanceButton.disabled = !selectedFile
+          || (engineInput.value === "openai" && !openAIConsentInput.checked);
         document.getElementById("button-label").textContent = "Restore my photograph";
         enhanceButton.querySelector("span").className = "";
       }
