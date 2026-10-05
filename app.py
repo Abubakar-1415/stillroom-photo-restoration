@@ -646,14 +646,14 @@ STUDIO_HTML = r"""<!doctype html>
           <div class="brand-sub">Photo restoration studio</div>
         </div>
       </div>
-      <div class="local-badge">AI restoration studio</div>
+      <div class="local-badge">Server-powered AI restoration</div>
     </header>
 
     <main>
       <section class="intro">
         <div class="eyebrow">A second life for your photographs</div>
         <h1>Bring the details <span>back.</span></h1>
-        <p>Restore softness and upscale with a careful AI finish. Balanced defaults favor your original image; AI may estimate fine detail that was missing from a blurry photo.</p>
+        <p>Upscale with Real-ESRGAN and restore detected faces with CodeFormer. Face restoration reconstructs plausible details and cannot guarantee the exact original appearance.</p>
       </section>
 
       <section class="workspace" aria-label="Photo restoration workspace">
@@ -690,7 +690,7 @@ STUDIO_HTML = r"""<!doctype html>
             <span class="upload-icon" aria-hidden="true">↑</span>
             <span class="upload-copy">
               <strong id="upload-name">Choose an image or drop it here</strong>
-              <span>JPG, PNG or WEBP</span>
+              <span>JPG, PNG or WEBP · sent to the server for processing</span>
             </span>
             <span class="browse">Browse files</span>
           </label>
@@ -731,7 +731,7 @@ STUDIO_HTML = r"""<!doctype html>
             </button>
             <div class="status" id="status" role="status" aria-live="polite">Choose a photo to prepare your restoration.</div>
             <div class="divider"></div>
-            <div class="privacy"><span aria-hidden="true">✓</span><span>Your image is processed by this app and is not saved as a permanent upload.</span></div>
+            <div class="privacy"><span aria-hidden="true">!</span><span>Your image is sent to the Hugging Face-hosted server for AI processing. It is not kept as a permanent upload; avoid sensitive photos. CodeFormer may reconstruct facial details that differ from the original.</span></div>
           </div>
         </aside>
       </section>
@@ -792,7 +792,7 @@ STUDIO_HTML = r"""<!doctype html>
       }
       enhanceButton.disabled = false;
       document.getElementById("button-label").textContent = "Restore my photograph";
-      setStatus("Image ready. Strong face reconstruction is enabled; review uncertain features carefully.");
+      setStatus("Image ready. Processing sends it to the hosted app for face restoration.");
     }
 
     fileInput.addEventListener("change", () => chooseFile(fileInput.files[0]));

@@ -3,32 +3,26 @@ title: Stillroom Photo Restoration
 emoji: ✨
 colorFrom: gray
 colorTo: yellow
-sdk: static
+sdk: docker
 ---
 
 # Stillroom — AI Photo Restoration
 
-A browser-based photo restoration studio. Upload a JPEG, PNG, or WEBP image,
-preview a Real-ESRGAN 4× upscale, and download the result as a PNG.
+A server-backed photo restoration studio. Upload a JPEG, PNG, or WEBP image,
+run Real-ESRGAN upscaling and CodeFormer face restoration, and download the
+result as a PNG.
 
-The public Hugging Face Space is static, so inference runs in each visitor's
-browser through ONNX Runtime Web and WebGPU when available. Uploaded
-photographs are not sent to an inference server. The hosted static demo
-defaults to 100% AI detail and 0% source preservation. It runs Real-ESRGAN
-upscaling only; it does not run face restoration. Real-ESRGAN cannot reliably
-remove severe motion blur or recover exact original details. The local FastAPI
-version can additionally run CodeFormer on detected faces; its default
-fidelity weight is 0.1 for stronger reconstruction, which may change uncertain
-facial features. At 0% AI detail blend, the static demo skips inference and
-returns only a conventional 4× interpolation.
+The hosted Space runs the FastAPI application on CPU. Uploaded images are sent
+to the Hugging Face-hosted app for processing and are not kept as a permanent
+gallery; do not upload sensitive photos. CodeFormer can reconstruct plausible
+facial detail, but it cannot know the exact details lost to blur and may alter
+the person's appearance. Its default fidelity weight is 0.1 for stronger
+restoration. Real-ESRGAN provides a 4× upscale.
 
 ## Open the public demo
 
-Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first AI upscale
-downloads the approximately 64 MB ONNX model into the browser cache; WebGPU is
-used when the browser supports it, otherwise the app falls back to WebAssembly.
-For reliable performance, use an up-to-date desktop browser and photos up to
-1.5 megapixels.
+Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first request may take
+longer while the free CPU Space starts and loads its models.
 
 ## Run the FastAPI version locally
 
@@ -42,17 +36,16 @@ cd "C:\path\to\photo enhancer"
 .\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8001
 ```
 
-Open <http://127.0.0.1:8001/studio>. The FastAPI version uses local
+Open <http://127.0.0.1:8001/studio>. The FastAPI app uses local
 Real-ESRGAN and CodeFormer checkpoints; set `REALESRGAN_WEIGHTS` and
 `CODEFORMER_ROOT` if they are not at the default paths.
 
 ## Public Space model file
 
-`index.html` is the static browser demo. `RealESRGAN_x4plus.onnx` is generated
-from the original Real-ESRGAN checkpoint for browser inference. The ONNX model
-is uploaded to the Hugging Face Space separately; model binaries, local
-environment files, and original checkpoints are excluded from the GitHub
-repository.
+`Dockerfile` builds the FastAPI Space with the Real-ESRGAN upscaler and
+CodeFormer face-restoration project. The browser-only `index.html` and ONNX
+model are retained for local static-demo reference; the live Space uses the
+server-backed FastAPI interface.
 
 ## API
 
@@ -66,9 +59,9 @@ repository.
 ## Model and image notes
 
 The app processes uploaded images in memory and temporary files needed by
-CodeFormer. It does not maintain an image gallery or save uploads as a
-permanent collection. Public demo links can be used by anyone who can access
-them, so avoid uploading sensitive photos.
+CodeFormer; it does not maintain a permanent image gallery. Because the public
+demo sends images to its hosting server for inference, avoid uploading
+sensitive photos.
 
 Real-ESRGAN, CodeFormer, and their checkpoints are third-party projects and
 assets. Review their upstream licenses and terms before redistribution or
