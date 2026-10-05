@@ -3,26 +3,25 @@ title: Stillroom Photo Restoration
 emoji: ✨
 colorFrom: gray
 colorTo: yellow
-sdk: docker
+sdk: static
 ---
 
-# Stillroom — AI Photo Restoration
+# Stillroom — AI Photo Upscaling
 
-A server-backed photo restoration studio. Upload a JPEG, PNG, or WEBP image,
-run Real-ESRGAN upscaling and CodeFormer face restoration, and download the
-result as a PNG.
+A browser-based photo upscaling demo. Upload a JPEG, PNG, or WEBP image, run
+Real-ESRGAN 4× upscaling, and download the result as a PNG.
 
-The hosted Space runs the FastAPI application on CPU. Uploaded images are sent
-to the Hugging Face-hosted app for processing and are not kept as a permanent
-gallery; do not upload sensitive photos. CodeFormer can reconstruct plausible
-facial detail, but it cannot know the exact details lost to blur and may alter
-the person's appearance. Its default fidelity weight is 0.1 for stronger
-restoration. Real-ESRGAN provides a 4× upscale.
+The public Space runs inference in your browser. Uploaded images remain on
+your device. Real-ESRGAN enlarges and sharpens images, but does not reliably
+remove severe motion blur or recover the exact original details. The separate
+FastAPI app can run CodeFormer face reconstruction locally. CodeFormer may
+invent facial features that were not captured in the original.
 
 ## Open the public demo
 
-Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first request may take
-longer while the free CPU Space starts and loads its models.
+Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first AI upscale
+downloads the approximately 64 MB ONNX model into the browser cache; WebGPU is
+used when supported, otherwise the app falls back to WebAssembly.
 
 ## Run the FastAPI version locally
 
@@ -42,10 +41,10 @@ Real-ESRGAN and CodeFormer checkpoints; set `REALESRGAN_WEIGHTS` and
 
 ## Public Space model file
 
-`Dockerfile` builds the FastAPI Space with the Real-ESRGAN upscaler and
-CodeFormer face-restoration project. The browser-only `index.html` and ONNX
-model are retained for local static-demo reference; the live Space uses the
-server-backed FastAPI interface.
+The Hugging Face account currently has no free CPU Space quota, so CodeFormer
+cannot run as a hosted server on this account. `index.html` is the live static
+browser demo. The included `Dockerfile` is for deployments with an available
+server runtime; it is not used by the public static Space.
 
 ## API
 
@@ -58,10 +57,9 @@ server-backed FastAPI interface.
 
 ## Model and image notes
 
-The app processes uploaded images in memory and temporary files needed by
-CodeFormer; it does not maintain a permanent image gallery. Because the public
-demo sends images to its hosting server for inference, avoid uploading
-sensitive photos.
+The public static demo processes uploads in the browser and does not send them
+to a server. The optional local FastAPI app processes images locally, including
+temporary files needed by CodeFormer.
 
 Real-ESRGAN, CodeFormer, and their checkpoints are third-party projects and
 assets. Review their upstream licenses and terms before redistribution or

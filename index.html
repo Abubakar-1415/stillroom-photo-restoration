@@ -99,9 +99,9 @@
     </header>
     <main>
       <section class="intro">
-        <div class="eyebrow">A second life for your photographs</div>
+        <div class="eyebrow">Browser-based photo upscaling</div>
         <h1>Bring the details <span>back.</span></h1>
-        <p>Upscale with Real-ESRGAN in your browser. AI can estimate detail lost to blur, but a single blurry photo cannot reveal the exact original face.</p>
+        <p>This demo enlarges images with Real-ESRGAN. It cannot reliably remove severe motion blur or recover facial detail that the camera did not capture.</p>
       </section>
       <section class="workspace" aria-label="Photo restoration workspace">
         <div class="panel">
@@ -115,9 +115,9 @@
               </div>
             </div>
             <div class="preview">
-              <div class="preview-label"><span>Restored</span><span id="result-size">Your finished image</span></div>
+              <div class="preview-label"><span>AI upscaled</span><span id="result-size">Your finished image</span></div>
               <div class="image-stage">
-                <div class="placeholder" id="result-placeholder"><div class="placeholder-icon">✧</div><div class="placeholder-title">Clarity, carefully restored</div><div class="placeholder-copy">Your finished photograph will appear here, ready to save.</div></div>
+                <div class="placeholder" id="result-placeholder"><div class="placeholder-icon">✧</div><div class="placeholder-title">4× upscale preview</div><div class="placeholder-copy">Fine detail lost to motion blur cannot be recovered by this model.</div></div>
                 <img id="result-image" alt="Restored photo" hidden>
               </div>
             </div>
@@ -135,13 +135,13 @@
           <div class="settings">
             <div class="setting">
               <div class="setting-top"><label class="setting-label" for="strength">AI detail blend</label><output id="strength-value" for="strength">100%</output></div>
-              <div class="hint">Set high for a visibly stronger result. AI estimates missing texture; it cannot know the exact details lost to blur.</div>
+              <div class="hint">This setting controls the AI upscale blend. It does not add a motion-deblurring or face-reconstruction model.</div>
               <input id="strength" type="range" min="0" max="100" value="100">
               <div class="range-labels"><span>Original-only upscale</span><span>More AI detail</span></div>
             </div>
             <div class="setting">
               <div class="setting-top"><label class="setting-label" for="fidelity">Source preservation</label><output id="fidelity-value" for="fidelity">0%</output></div>
-              <div class="hint">0% allows the strongest AI changes; this browser-only model upscales but does not run the face-restoration model.</div>
+              <div class="hint">Controls how closely the AI upscale follows the original. No setting can recover exact details missing from a blurred image.</div>
               <input id="fidelity" type="range" min="0" max="100" value="0">
               <div class="range-labels"><span>More AI variation</span><span>Faithful</span></div>
             </div>
@@ -153,7 +153,7 @@
           </div>
         </aside>
       </section>
-      <footer><span>Real-ESRGAN ×4 upscaling</span><span>Adjustable original blend</span><span>PNG export</span></footer>
+      <footer><span>Real-ESRGAN ×4 upscaling</span><span>Not motion deblurring</span><span>PNG export</span></footer>
     </main>
   </div>
   <script type="module">
@@ -229,7 +229,7 @@
       restoreButton.disabled = false;
       document.getElementById("button-label").textContent = "Restore my photograph";
       resetResult();
-      setStatus("Image ready. Strong AI detail is enabled; review uncertain facial details carefully.");
+      setStatus("Image ready. This demo upscales; it cannot reliably remove severe motion blur.");
     }
 
     async function loadModel() {
@@ -426,8 +426,8 @@
         download.download = `${selectedFilename}-restored.png`;
         download.hidden = false;
         document.getElementById("result-info").textContent = blendPercent === 0
-          ? "Original-only upscale · no AI-generated detail"
-          : `${blendPercent}% AI detail · ${fidelityPercent}% source preservation`;
+          ? "Original-only 4× upscale · no AI-generated detail"
+          : `${blendPercent}% AI upscale blend · ${fidelityPercent}% source preservation`;
         setStatus("Your restored photo is ready to download.", "success");
       } catch (error) {
         console.error(error);
