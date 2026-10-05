@@ -9,6 +9,7 @@ __pycache__/
 models/
 CodeFormer/weights/
 CodeFormer-src/
+Restormer/
 results/
 app.backup.py
 photo resolution.py

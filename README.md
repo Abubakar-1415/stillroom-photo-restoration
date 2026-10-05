@@ -6,21 +6,18 @@ colorTo: yellow
 sdk: static
 ---
 
-# Stillroom — AI Photo Upscaling
+# Stillroom — AI Photo Restoration
 
-A browser-based photo upscaling demo. Upload a JPEG, PNG, or WEBP image, run
-Real-ESRGAN 4× upscaling, and download the result as a PNG.
+The local FastAPI studio offers a staged workflow: optional noise reduction,
+Restormer motion deblurring, optional CodeFormer generative face reconstruction,
+then Real-ESRGAN 4× upscaling. Review the side-by-side result before downloading.
+Face reconstruction is opt-in because it can invent facial details.
 
-The public Space runs inference in your browser. Uploaded images remain on
-your device. Real-ESRGAN enlarges and sharpens images, but does not reliably
-remove severe motion blur or recover the exact original details. The separate
-FastAPI app can run CodeFormer face reconstruction locally. CodeFormer may
-invent facial features that were not captured in the original.
-
-The browser app also links to the official CodeFormer demo as a separate,
-optional service for face reconstruction. Users must upload images directly
-there; this app does not transmit them. CodeFormer may invent facial details,
-and external service privacy and model terms apply.
+Restormer is trained on benchmark motion blur and may perform poorly on real
+phone blur; it cannot reliably recover severe blur. Generative face restoration
+can produce plausible details, not evidence of the exact original appearance.
+The public Hugging Face Space remains a browser-only Real-ESRGAN upscaler and
+does not run this server pipeline.
 
 ## Open the public demo
 
@@ -40,16 +37,23 @@ cd "C:\path\to\photo enhancer"
 .\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8001
 ```
 
-Open <http://127.0.0.1:8001/studio>. The FastAPI app uses local
-Real-ESRGAN and CodeFormer checkpoints; set `REALESRGAN_WEIGHTS` and
-`CODEFORMER_ROOT` if they are not at the default paths.
+Open <http://127.0.0.1:8001/studio>. The FastAPI app uses local Real-ESRGAN
+and CodeFormer checkpoints. Set `REALESRGAN_WEIGHTS`, `CODEFORMER_ROOT`, and
+`RESTORMER_ROOT` if they are not at their defaults. On the first deblur
+request it downloads the public
+Restormer motion-deblurring checkpoint (about 105 MB) from Hugging Face into
+the local Hub cache. A Restormer source checkout is also required:
+
+```powershell
+git clone --depth 1 https://github.com/swz30/Restormer.git .\Restormer
+```
 
 ## Public Space model file
 
-The Hugging Face account currently has no free CPU Space quota, so CodeFormer
-cannot run as a hosted server on this account. `index.html` is the live static
-browser demo. The included `Dockerfile` is for deployments with an available
-server runtime; it is not used by the public static Space.
+The Hugging Face account currently has no free CPU Space quota. The live
+`index.html` Space therefore remains the browser-only upscaler; the Dockerfile
+is for a server host with sufficient compute. Server requests upload the photo
+to that host for processing.
 
 ## API
 
@@ -57,14 +61,17 @@ server runtime; it is not used by the public static Space.
   browsers.
 - `GET /studio` serves the photo-restoration interface.
 - `GET /health` reports whether the upscaling model has loaded.
-- `POST /enhance` accepts a multipart image file with optional `strength` and
-  `fidelity` values from `0` to `1`; it returns the restored image as PNG.
+- `POST /enhance` accepts an image and optional `strength`, `fidelity`,
+  `denoise_strength`, `deblur`, and `face_recovery` settings; it returns the
+  processed image as PNG. `face_recovery` defaults to false.
 
 ## Model and image notes
 
 The public static demo processes uploads in the browser and does not send them
-to a server. The optional local FastAPI app processes images locally, including
-temporary files needed by CodeFormer.
+to a server. The FastAPI app sends uploads to its own server process and uses
+temporary files for optional CodeFormer processing. Restormer and CodeFormer
+are separate optional stages; neither can guarantee exact recovery of details
+lost from a single blurry frame.
 
 Real-ESRGAN, CodeFormer, and their checkpoints are third-party projects and
 assets. Review their upstream licenses and terms before redistribution or

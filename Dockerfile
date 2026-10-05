@@ -3,6 +3,7 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     CODEFORMER_ROOT=/opt/codeformer \
+    RESTORMER_ROOT=/opt/restormer \
     REALESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
     REALESRGAN_TILE=256
 
@@ -13,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 user \
-    && mkdir -p /app/models /opt/codeformer \
-    && chown -R user:user /app /opt/codeformer
+    && mkdir -p /app/models /opt/codeformer /opt/restormer \
+    && chown -R user:user /app /opt/codeformer /opt/restormer
 
 WORKDIR /app
 
@@ -31,6 +32,7 @@ ADD --chown=user:user https://github.com/xinntao/Real-ESRGAN/releases/download/v
 USER user
 
 RUN git clone --depth 1 --branch v0.1.0 https://github.com/sczhou/CodeFormer.git /opt/codeformer
+RUN git clone --depth 1 https://github.com/swz30/Restormer.git /opt/restormer
 
 EXPOSE 7860
 

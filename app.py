@@ -1,6 +1,8 @@
 import io
+import importlib.util
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 import cv2
@@ -16,6 +18,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from realesrgan import RealESRGANer
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 
 
 
@@ -45,6 +49,13 @@ if (
 ):
     DEFAULT_CODEFORMER_ROOT = LOCAL_CODEFORMER_ROOT
 
+DEFAULT_RESTORMER_ROOT = BASE_DIR / "Restormer"
+RESTORMER_ROOT = Path(
+    os.environ.get(
+        "RESTORMER_ROOT",
+        str(DEFAULT_RESTORMER_ROOT),
+    )
+)
 REALESRGAN_WEIGHTS = Path(
     os.environ.get(
         "REALESRGAN_WEIGHTS",
@@ -58,6 +69,9 @@ CODEFORMER_ROOT = Path(
     )
 )
 REALESRGAN_TILE = int(os.environ.get("REALESRGAN_TILE", "256"))
+RESTORMER_REPO_ID = "mlx-community/Restormer-motion-deblurring-fp32"
+RESTORMER_TILE_SIZE = 192
+RESTORMER_TILE_OVERLAP = 32
 
 
 # ============================================================
@@ -66,7 +80,7 @@ REALESRGAN_TILE = int(os.environ.get("REALESRGAN_TILE", "256"))
 
 app = FastAPI(
     title="AI Image Enhancer API",
-    description="Real-ESRGAN + CodeFormer image enhancement API",
+    description="Staged noise reduction, deblurring, face recovery, and upscaling API",
     version="1.0.0",
 )
 
@@ -83,6 +97,7 @@ print("=" * 60)
 print(f"Device: {DEVICE}")
 print(f"Real-ESRGAN weights: {REALESRGAN_WEIGHTS}")
 print(f"CodeFormer root: {CODEFORMER_ROOT}")
+print(f"Restormer root: {RESTORMER_ROOT}")
 print("=" * 60)
 
 
@@ -91,6 +106,8 @@ print("=" * 60)
 # ============================================================
 
 upsampler = None
+restormer = None
+restormer_lock = threading.Lock()
 
 
 def initialize_models():
@@ -190,12 +207,149 @@ def run_codeformer(input_path: str, output_path: str, fidelity: float):
     shutil.copyfile(generated, output_path)
 
 
+def load_restormer():
+    global restormer
+
+    if restormer is not None:
+        return restormer
+
+    with restormer_lock:
+        if restormer is not None:
+            return restormer
+
+        architecture_path = (
+            RESTORMER_ROOT
+            / "basicsr"
+            / "models"
+            / "archs"
+            / "restormer_arch.py"
+        )
+        if not architecture_path.is_file():
+            raise FileNotFoundError(
+                "Restormer source was not found. Set RESTORMER_ROOT "
+                f"to a Restormer checkout; expected {architecture_path}."
+            )
+
+        spec = importlib.util.spec_from_file_location(
+            "_stillroom_restorer_arch",
+            architecture_path,
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError(
+                f"Could not load Restormer architecture from {architecture_path}."
+            )
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        model = module.Restormer(
+            inp_channels=3,
+            out_channels=3,
+            dim=48,
+            num_blocks=[4, 6, 6, 8],
+            num_refinement_blocks=4,
+            heads=[1, 2, 4, 8],
+            ffn_expansion_factor=2.66,
+            bias=False,
+            LayerNorm_type="WithBias",
+            dual_pixel_task=False,
+        )
+
+        checkpoint_path = hf_hub_download(
+            repo_id=RESTORMER_REPO_ID,
+            filename="model.safetensors",
+        )
+        state_dict = load_file(checkpoint_path)
+        pytorch_state = {
+            name: (
+                value.permute(0, 3, 1, 2).contiguous()
+                if value.ndim == 4
+                else value
+            )
+            for name, value in state_dict.items()
+        }
+        model.load_state_dict(pytorch_state, strict=True)
+        model.to(DEVICE)
+        model.eval()
+        restormer = model
+
+    return restormer
+
+
+def run_restormer(image: np.ndarray) -> np.ndarray:
+    model = load_restormer()
+    height, width = image.shape[:2]
+    output = np.empty_like(image)
+    tile_size = RESTORMER_TILE_SIZE
+    overlap = RESTORMER_TILE_OVERLAP
+
+    for core_top in range(0, height, tile_size):
+        for core_left in range(0, width, tile_size):
+            core_bottom = min(core_top + tile_size, height)
+            core_right = min(core_left + tile_size, width)
+            tile_top = max(0, core_top - overlap)
+            tile_left = max(0, core_left - overlap)
+            tile_bottom = min(height, core_bottom + overlap)
+            tile_right = min(width, core_right + overlap)
+
+            tile_rgb = cv2.cvtColor(
+                image[tile_top:tile_bottom, tile_left:tile_right],
+                cv2.COLOR_BGR2RGB,
+            )
+            tensor = (
+                torch.from_numpy(tile_rgb.transpose(2, 0, 1).copy())
+                .float()
+                .div_(255.0)
+                .unsqueeze(0)
+                .to(DEVICE)
+            )
+            pad_height = (-tensor.shape[-2]) % 8
+            pad_width = (-tensor.shape[-1]) % 8
+            if pad_height or pad_width:
+                pad_mode = (
+                    "reflect"
+                    if tensor.shape[-2] > pad_height
+                    and tensor.shape[-1] > pad_width
+                    else "replicate"
+                )
+                tensor = torch.nn.functional.pad(
+                    tensor,
+                    (0, pad_width, 0, pad_height),
+                    mode=pad_mode,
+                )
+
+            with torch.inference_mode():
+                restored = model(tensor)
+
+            restored = (
+                restored[..., :tile_bottom - tile_top, :tile_right - tile_left]
+                .clamp(0, 1)
+                .squeeze(0)
+                .permute(1, 2, 0)
+                .cpu()
+                .numpy()
+            )
+            restored_bgr = cv2.cvtColor(
+                np.round(restored * 255).astype(np.uint8),
+                cv2.COLOR_RGB2BGR,
+            )
+
+            output[core_top:core_bottom, core_left:core_right] = restored_bgr[
+                core_top - tile_top:core_bottom - tile_top,
+                core_left - tile_left:core_right - tile_left,
+            ]
+
+    return output
+
+
 def process_image(
     image_bytes: bytes,
     strength: float,
     fidelity: float,
-) -> tuple[bytes, float, float, str]:
-    """Upscale an image and optionally restore detected faces with CodeFormer."""
+    denoise_strength: int,
+    deblur: bool,
+    face_recovery: bool,
+) -> tuple[bytes, float, float, str, bool, int, str]:
+    """Denoise, deblur, optionally reconstruct faces, then upscale."""
 
     # --------------------------------------------------------
     # Decode image
@@ -223,29 +377,64 @@ def process_image(
     blur_score = calculate_blur_score(image)
 
     applied_strength = strength
+    processed = image.copy()
+    stages = []
 
-    # --------------------------------------------------------
-    # Real-ESRGAN
-    # --------------------------------------------------------
+    if denoise_strength > 0:
+        processed = cv2.fastNlMeansDenoisingColored(
+            processed,
+            None,
+            h=denoise_strength,
+            hColor=denoise_strength,
+            templateWindowSize=7,
+            searchWindowSize=21,
+        )
+        stages.append("Noise reduction")
 
-    print(
-        f"Processing image | "
-        f"Blur={blur_score:.2f} | "
-        f"Strength={applied_strength:.2f}"
-    )
+    if deblur:
+        processed = run_restormer(processed)
+        stages.append("Motion deblurring (Restormer)")
+
+    face_restoration = "not_requested"
+    if face_recovery:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "deblurred.png"
+            restored_path = Path(temp_dir) / "face-reconstructed.png"
+            if not cv2.imwrite(str(input_path), processed):
+                raise RuntimeError(
+                    "Could not prepare the image for CodeFormer face recovery."
+                )
+
+            run_codeformer(
+                input_path=str(input_path),
+                output_path=str(restored_path),
+                fidelity=fidelity,
+            )
+            restored = cv2.imread(str(restored_path))
+            if restored is None:
+                raise RuntimeError(
+                    "CodeFormer did not produce a readable face-recovery image."
+                )
+            if restored.shape != processed.shape:
+                restored = cv2.resize(
+                    restored,
+                    (processed.shape[1], processed.shape[0]),
+                    interpolation=cv2.INTER_LANCZOS4,
+                )
+            processed = restored
+            face_restoration = "success"
+            stages.append("Generative face reconstruction (CodeFormer)")
 
     try:
-
         ai_output, _ = upsampler.enhance(
-            image,
+            processed,
             outscale=4,
         )
-
     except Exception as exc:
-
         raise RuntimeError(
-            f"Real-ESRGAN processing failed: {exc}"
+            f"Real-ESRGAN upscaling failed: {exc}"
         ) from exc
+    stages.append("Real-ESRGAN 4x upscaling")
 
     original_upscaled = cv2.resize(
         image,
@@ -259,79 +448,6 @@ def process_image(
         1.0 - applied_strength,
         0.0,
     )
-
-    # --------------------------------------------------------
-    # Temporary files for CodeFormer
-    # --------------------------------------------------------
-
-    face_restoration = "skipped"
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-
-        temp_dir = Path(temp_dir)
-
-        input_path = temp_dir / "upscaled.png"
-        restored_path = temp_dir / "restored.png"
-
-        success = cv2.imwrite(
-            str(input_path),
-            output,
-        )
-
-        if not success:
-            raise RuntimeError(
-                "Could not save the upscaled image."
-            )
-
-        # ----------------------------------------------------
-        # CodeFormer
-        # ----------------------------------------------------
-
-        if applied_strength > 0:
-
-            try:
-
-                run_codeformer(
-                    input_path=str(input_path),
-                    output_path=str(restored_path),
-                    fidelity=fidelity,
-                )
-
-                if restored_path.exists():
-
-                    restored = cv2.imread(
-                        str(restored_path)
-                    )
-
-                    if restored is not None:
-                        if restored.shape != output.shape:
-                            restored = cv2.resize(
-                                restored,
-                                (output.shape[1], output.shape[0]),
-                                interpolation=cv2.INTER_LANCZOS4,
-                            )
-                        output = cv2.addWeighted(
-                            restored,
-                            applied_strength,
-                            output,
-                            1.0 - applied_strength,
-                            0.0,
-                        )
-                        face_restoration = "success"
-
-                    else:
-                        face_restoration = "failed"
-
-                else:
-                    face_restoration = "failed"
-
-            except Exception as exc:
-
-                print(
-                    f"CodeFormer warning: {exc}"
-                )
-
-                face_restoration = "failed"
 
     # --------------------------------------------------------
     # Encode final image
@@ -352,6 +468,9 @@ def process_image(
         applied_strength,
         blur_score,
         face_restoration,
+        deblur,
+        denoise_strength,
+        " > ".join(stages),
     )
 
 
@@ -382,6 +501,7 @@ async def health():
     return {
         "status": "healthy",
         "model_loaded": upsampler is not None,
+        "deblur_model_loaded": restormer is not None,
         "device": DEVICE,
     }
 
@@ -403,6 +523,13 @@ async def enhance_image(
         ge=0.0,
         le=1.0,
     ),
+    denoise_strength: int = Form(
+        2,
+        ge=0,
+        le=10,
+    ),
+    deblur: bool = Form(True),
+    face_recovery: bool = Form(False),
 ):
 
     # --------------------------------------------------------
@@ -458,10 +585,16 @@ async def enhance_image(
             applied_strength,
             blur_score,
             restoration_status,
+            deblur_used,
+            applied_denoise,
+            processing_stages,
         ) = process_image(
             image_bytes=image_bytes,
             strength=strength,
             fidelity=fidelity,
+            denoise_strength=denoise_strength,
+            deblur=deblur,
+            face_recovery=face_recovery,
         )
 
     except Exception as exc:
@@ -483,6 +616,9 @@ async def enhance_image(
         "X-Face-Strength": f"{applied_strength:.2f}",
         "X-Blur-Score": f"{blur_score:.2f}",
         "X-Face-Restoration": restoration_status,
+        "X-Deblur-Used": str(deblur_used).lower(),
+        "X-Denoise-Strength": str(applied_denoise),
+        "X-Processing-Stages": processing_stages,
     }
 
     return StreamingResponse(
@@ -653,7 +789,7 @@ STUDIO_HTML = r"""<!doctype html>
       <section class="intro">
         <div class="eyebrow">A second life for your photographs</div>
         <h1>Bring the details <span>back.</span></h1>
-        <p>Upscale with Real-ESRGAN and restore detected faces with CodeFormer. Face restoration reconstructs plausible details and cannot guarantee the exact original appearance.</p>
+        <p>Reduce noise and motion blur, then upscale. Optional generative face recovery can create plausible details, but those details may differ from the original.</p>
       </section>
 
       <section class="workspace" aria-label="Photo restoration workspace">
@@ -712,16 +848,33 @@ STUDIO_HTML = r"""<!doctype html>
                 <label class="setting-label" for="strength">AI detail blend</label>
                 <output class="setting-value" id="strength-value" for="strength">100%</output>
               </div>
-              <div class="setting-hint">Set high for a visibly stronger result. AI estimates missing texture; it cannot know the exact details lost to blur.</div>
+              <div class="setting-hint">Blend the complete AI pipeline with the original. Higher values apply more denoising, deblurring, and upscale detail.</div>
               <input id="strength" type="range" min="0" max="100" value="100">
               <div class="scale-labels"><span>Original-only upscale</span><span>More AI detail</span></div>
+            </div>
+            <div class="setting">
+              <div class="setting-top">
+                <label class="setting-label" for="denoise">Noise reduction</label>
+                <output class="setting-value" id="denoise-value" for="denoise">2</output>
+              </div>
+              <div class="setting-hint">Light denoising before deblurring. Increase only if the photo has visible grain.</div>
+              <input id="denoise" type="range" min="0" max="10" value="2">
+              <div class="scale-labels"><span>Off</span><span>Stronger</span></div>
+            </div>
+            <div class="setting">
+              <label class="setting-label"><input id="deblur" type="checkbox" checked> Motion deblur (Restormer)</label>
+              <div class="setting-hint">Trained for benchmark motion blur. Results vary on real phone photos, and severe blur may remain.</div>
+            </div>
+            <div class="setting">
+              <label class="setting-label"><input id="face-recovery" type="checkbox"> Generative face recovery (CodeFormer)</label>
+              <div class="setting-hint">Optional reconstruction for faces. It can invent facial details; review the preview carefully before downloading.</div>
             </div>
             <div class="setting">
               <div class="setting-top">
                 <label class="setting-label" for="fidelity">Source preservation</label>
                 <output class="setting-value" id="fidelity-value" for="fidelity">10%</output>
               </div>
-              <div class="setting-hint">Lower preservation gives CodeFormer more freedom to reconstruct facial detail; reconstructed features may not match the original exactly.</div>
+              <div class="setting-hint">Used only when generative face recovery is enabled. Higher values favor identity preservation over visual quality.</div>
               <input id="fidelity" type="range" min="0" max="100" value="10">
               <div class="scale-labels"><span>Creative</span><span>Faithful</span></div>
             </div>
@@ -731,14 +884,14 @@ STUDIO_HTML = r"""<!doctype html>
             </button>
             <div class="status" id="status" role="status" aria-live="polite">Choose a photo to prepare your restoration.</div>
             <div class="divider"></div>
-            <div class="privacy"><span aria-hidden="true">!</span><span>Your image is sent to the Hugging Face-hosted server for AI processing. It is not kept as a permanent upload; avoid sensitive photos. CodeFormer may reconstruct facial details that differ from the original.</span></div>
+            <div class="privacy"><span aria-hidden="true">!</span><span>Your image is sent to this app's server for AI processing. It is not kept as a permanent upload. Generative face recovery is optional and may change facial details; avoid sensitive photos.</span></div>
           </div>
         </aside>
       </section>
 
       <div class="footer">
         <span>Real-ESRGAN upscaling</span>
-        <span>Conservative face restoration</span>
+        <span>Optional generative face recovery</span>
         <span>High-resolution PNG export</span>
       </div>
     </main>
@@ -752,6 +905,8 @@ STUDIO_HTML = r"""<!doctype html>
     const enhanceButton = document.getElementById("enhance-button");
     const status = document.getElementById("status");
     const downloadLink = document.getElementById("download-link");
+    const faceRecoveryInput = document.getElementById("face-recovery");
+    const fidelityInput = document.getElementById("fidelity");
     let selectedFile = null;
     let originalUrl = null;
     let resultUrl = null;
@@ -792,10 +947,14 @@ STUDIO_HTML = r"""<!doctype html>
       }
       enhanceButton.disabled = false;
       document.getElementById("button-label").textContent = "Restore my photograph";
-      setStatus("Image ready. Processing sends it to the hosted app for face restoration.");
+      setStatus("Image ready. Processing sends it to this server for the selected restoration stages.");
     }
 
     fileInput.addEventListener("change", () => chooseFile(fileInput.files[0]));
+    faceRecoveryInput.addEventListener("change", () => {
+      fidelityInput.disabled = !faceRecoveryInput.checked;
+    });
+    fidelityInput.disabled = !faceRecoveryInput.checked;
     for (const eventName of ["dragenter", "dragover"]) {
       dropZone.addEventListener(eventName, event => {
         event.preventDefault();
@@ -810,11 +969,15 @@ STUDIO_HTML = r"""<!doctype html>
     }
     dropZone.addEventListener("drop", event => chooseFile(event.dataTransfer.files[0]));
 
-    for (const [inputId, outputId] of [["strength", "strength-value"], ["fidelity", "fidelity-value"]]) {
+    for (const [inputId, outputId, suffix] of [
+      ["strength", "strength-value", "%"],
+      ["fidelity", "fidelity-value", "%"],
+      ["denoise", "denoise-value", ""]
+    ]) {
       const input = document.getElementById(inputId);
       input.addEventListener("input", () => {
-        document.getElementById(outputId).value = `${input.value}%`;
-        document.getElementById(outputId).textContent = `${input.value}%`;
+        document.getElementById(outputId).value = `${input.value}${suffix}`;
+        document.getElementById(outputId).textContent = `${input.value}${suffix}`;
       });
     }
 
@@ -824,10 +987,13 @@ STUDIO_HTML = r"""<!doctype html>
       data.append("file", selectedFile);
       data.append("strength", (Number(document.getElementById("strength").value) / 100).toString());
       data.append("fidelity", (Number(document.getElementById("fidelity").value) / 100).toString());
+      data.append("denoise_strength", document.getElementById("denoise").value);
+      data.append("deblur", document.getElementById("deblur").checked.toString());
+      data.append("face_recovery", document.getElementById("face-recovery").checked.toString());
       enhanceButton.disabled = true;
       document.getElementById("button-label").textContent = "Restoring image…";
       enhanceButton.querySelector("span").className = "button-spinner";
-      setStatus("Upscaling and refining details. This may take a little while on the first image.");
+      setStatus("Reducing noise, deblurring, and upscaling. The first deblur may take longer while the model downloads.");
       try {
         const response = await fetch("/enhance", { method: "POST", body: data });
         if (!response.ok) {
@@ -853,11 +1019,10 @@ STUDIO_HTML = r"""<!doctype html>
         downloadLink.hidden = false;
         const blur = response.headers.get("X-Blur-Score");
         const restoration = response.headers.get("X-Face-Restoration");
-        const notes = [];
-        if (blur) notes.push(`Input detail score ${Number(blur).toFixed(1)}`);
-        if (restoration === "success") notes.push("face detail refined");
-        if (restoration === "skipped") notes.push("upscaled, face refinement not needed");
-        if (restoration === "failed") notes.push("upscaled; face refinement unavailable");
+        const stages = response.headers.get("X-Processing-Stages");
+        const notes = stages ? [stages] : [];
+        if (restoration === "success") notes.push("Review reconstructed facial details carefully.");
+        if (blur) notes.push(`Input sharpness score ${Number(blur).toFixed(1)}`);
         document.getElementById("result-info").textContent = notes.join(" · ") || "Your restored image is ready to download.";
         setStatus("Restoration complete. Your high-resolution image is ready.", "success");
       } catch (error) {
