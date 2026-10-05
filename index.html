@@ -80,6 +80,8 @@
     .status.success { color: var(--success); }
     .privacy { display: flex; gap: 7px; color: #87918f; font-size: 9px; line-height: 1.55; }
     .privacy span:first-child { color: var(--success); }
+    .external-tool { margin-top: 10px; padding: 10px 11px; display: block; border: 1px solid rgba(201, 170, 117, .35); border-radius: 8px; color: var(--accent-light); font-size: 10px; font-weight: 600; line-height: 1.5; text-decoration: none; transition: .18s; }
+    .external-tool:hover { border-color: var(--accent-light); background: rgba(201, 170, 117, .07); }
     .result-bar { min-height: 54px; padding: 9px 13px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); }
     .result-info { color: var(--muted); font-size: 9px; line-height: 1.5; }
     .download { padding: 8px 10px; border: 1px solid rgba(201, 170, 117, .44); border-radius: 7px; color: var(--accent-light); text-decoration: none; font-size: 9px; white-space: nowrap; }
@@ -150,6 +152,13 @@
             <div class="status" id="status" role="status" aria-live="polite">Select a photo to prepare your restoration.</div>
             <div class="divider"></div>
             <div class="privacy"><span aria-hidden="true">✓</span><span>Images are processed in this browser and are not uploaded to a server. AI can only estimate details missing from a blurry original.</span></div>
+            <div class="divider"></div>
+            <div class="setting">
+              <div class="setting-label">Want face reconstruction?</div>
+              <div class="hint">The upscaler above cannot restore facial details lost to motion blur. The official CodeFormer demo offers a separate face-reconstruction model, but it may invent details and cannot recover the exact original.</div>
+              <a class="external-tool" href="https://sczhou-codeformer.hf.space/" target="_blank" rel="noopener noreferrer">Open official CodeFormer demo ↗</a>
+              <div class="hint">This is an external Hugging Face service. Nothing is sent from this page; you must choose and upload the photo there yourself. Review its privacy and model terms first, especially for photos of children or other people.</div>
+            </div>
           </div>
         </aside>
       </section>

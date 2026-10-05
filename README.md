@@ -17,6 +17,11 @@ remove severe motion blur or recover the exact original details. The separate
 FastAPI app can run CodeFormer face reconstruction locally. CodeFormer may
 invent facial features that were not captured in the original.
 
+The browser app also links to the official CodeFormer demo as a separate,
+optional service for face reconstruction. Users must upload images directly
+there; this app does not transmit them. CodeFormer may invent facial details,
+and external service privacy and model terms apply.
+
 ## Open the public demo
 
 Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first AI upscale
