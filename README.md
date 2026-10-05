@@ -13,17 +13,18 @@ preview a Real-ESRGAN 4× upscale, and download the result as a PNG.
 
 The public Hugging Face Space is static, so inference runs in each visitor's
 browser through ONNX Runtime Web and WebGPU when available. Uploaded
-photographs are not sent to an inference server. The recommended starting
-settings are **AI detail blend** at 100% and **Source preservation** at 45%.
-Higher source preservation tightly limits AI color changes and can make the
-result look almost unchanged. At 0% AI detail blend, inference is skipped and
-the app returns only a conventional 4× interpolation of the original.
-Real-ESRGAN estimates plausible detail; it cannot recover the exact original
-from information lost to severe blur or motion blur.
+photographs are not sent to an inference server. The hosted static demo
+defaults to 100% AI detail and 0% source preservation. It runs Real-ESRGAN
+upscaling only; it does not run face restoration. Real-ESRGAN cannot reliably
+remove severe motion blur or recover exact original details. The local FastAPI
+version can additionally run CodeFormer on detected faces; its default
+fidelity weight is 0.1 for stronger reconstruction, which may change uncertain
+facial features. At 0% AI detail blend, the static demo skips inference and
+returns only a conventional 4× interpolation.
 
 ## Open the public demo
 
-Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first AI restoration
+Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first AI upscale
 downloads the approximately 64 MB ONNX model into the browser cache; WebGPU is
 used when the browser supports it, otherwise the app falls back to WebAssembly.
 For reliable performance, use an up-to-date desktop browser and photos up to

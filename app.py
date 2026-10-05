@@ -195,7 +195,7 @@ def process_image(
     strength: float,
     fidelity: float,
 ) -> tuple[bytes, float, float, str]:
-    """Upscale an image and apply conservative face restoration."""
+    """Upscale an image and optionally restore detected faces with CodeFormer."""
 
     # --------------------------------------------------------
     # Decode image
@@ -394,7 +394,7 @@ async def health():
 async def enhance_image(
     file: UploadFile = File(...),
     fidelity: float = Form(
-        0.45,
+        0.1,
         ge=0.0,
         le=1.0,
     ),
@@ -719,10 +719,10 @@ STUDIO_HTML = r"""<!doctype html>
             <div class="setting">
               <div class="setting-top">
                 <label class="setting-label" for="fidelity">Source preservation</label>
-                <output class="setting-value" id="fidelity-value" for="fidelity">45%</output>
+                <output class="setting-value" id="fidelity-value" for="fidelity">10%</output>
               </div>
-              <div class="setting-hint">Higher preservation keeps AI changes very small and can leave a blurry photo unchanged. Start around 35–55% for stronger detail.</div>
-              <input id="fidelity" type="range" min="0" max="100" value="45">
+              <div class="setting-hint">Lower preservation gives CodeFormer more freedom to reconstruct facial detail; reconstructed features may not match the original exactly.</div>
+              <input id="fidelity" type="range" min="0" max="100" value="10">
               <div class="scale-labels"><span>Creative</span><span>Faithful</span></div>
             </div>
             <div class="divider"></div>
@@ -792,7 +792,7 @@ STUDIO_HTML = r"""<!doctype html>
       }
       enhanceButton.disabled = false;
       document.getElementById("button-label").textContent = "Restore my photograph";
-      setStatus("Image ready. Adjust the finish or start with the balanced defaults.");
+      setStatus("Image ready. Strong face reconstruction is enabled; review uncertain features carefully.");
     }
 
     fileInput.addEventListener("change", () => chooseFile(fileInput.files[0]));
