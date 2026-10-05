@@ -24,6 +24,10 @@ does not run this server pipeline.
 Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first AI upscale
 downloads the approximately 64 MB ONNX model into the browser cache; WebGPU is
 used when supported, otherwise the app falls back to WebAssembly.
+The browser demo accepts up to five images per batch through the file picker
+or drag-and-drop, processes them sequentially, and provides an individual PNG
+download for each result. Each image must be under 1.5 megapixels; images stay
+in the browser and are not uploaded to a server.
 
 ## Run the FastAPI version locally
 

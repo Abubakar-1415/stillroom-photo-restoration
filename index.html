@@ -86,6 +86,22 @@
     .result-info { color: var(--muted); font-size: 9px; line-height: 1.5; }
     .download { padding: 8px 10px; border: 1px solid rgba(201, 170, 117, .44); border-radius: 7px; color: var(--accent-light); text-decoration: none; font-size: 9px; white-space: nowrap; }
     .download:hover { background: rgba(201, 170, 117, .08); }
+    .queue { padding: 0 12px 12px; }
+    .queue-head { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #c6ccca; font-size: 10px; }
+    .queue-list { display: grid; gap: 7px; }
+    .queue-item { min-width: 0; padding: 8px; display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 9px; background: rgba(13, 17, 21, .45); }
+    .queue-thumb { width: 42px; height: 42px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; background: #101419; }
+    .queue-meta { min-width: 0; flex: 1; }
+    .queue-name { overflow: hidden; color: #e4e4df; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .queue-state { margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .queue-state.error { color: var(--danger); }
+    .queue-state.success { color: var(--success); }
+    .queue-action { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--accent-light); font-size: 9px; text-decoration: none; white-space: nowrap; cursor: pointer; }
+    .queue-action:hover:not(:disabled) { background: rgba(201, 170, 117, .08); }
+    .queue-action:disabled { opacity: .45; cursor: not-allowed; }
+    .queue-clear { padding: 4px 0; border: 0; background: transparent; color: var(--muted); font-size: 9px; cursor: pointer; }
+    .queue-clear:hover:not(:disabled) { color: var(--text); }
+    .batch-hint { margin-top: 8px; color: var(--muted); font-size: 9px; line-height: 1.5; }
     footer { margin-top: 19px; display: flex; justify-content: center; gap: 9px; color: #747e84; font-size: 9px; }
     footer span + span::before { content: "·"; margin-right: 9px; color: #586168; }
     [hidden] { display: none !important; }
@@ -126,10 +142,15 @@
           </div>
           <label class="drop-zone" id="drop-zone" for="file-input">
             <span class="upload-icon" aria-hidden="true">↑</span>
-            <span class="upload-copy"><strong id="upload-name">Choose a photo or drop it here</strong><span>JPG, PNG or WEBP · stays on your device</span></span>
+            <span class="upload-copy"><strong id="upload-name">Choose photos or drop them here</strong><span>JPG, PNG or WEBP · select or drag multiple · stays on your device</span></span>
             <span class="browse">Browse files</span>
           </label>
-          <input id="file-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+          <input id="file-input" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+          <div class="queue" id="queue" hidden>
+            <div class="queue-head"><span id="queue-title">Photos</span><button class="queue-clear" id="queue-clear" type="button">Clear all</button></div>
+            <div class="queue-list" id="queue-list"></div>
+            <div class="batch-hint">Up to five photos are kept in the queue at once and restored one at a time to limit browser memory use. Remove finished photos to add more.</div>
+          </div>
           <div class="result-bar"><div class="result-info" id="result-info">Your original is never changed. Download the result as a high-resolution PNG.</div><a class="download" id="download" href="#" download="stillroom-restored.png" hidden>↓ &nbsp; Download PNG</a></div>
         </div>
         <aside class="panel">
@@ -173,6 +194,7 @@
     const TILE_SIZE = 256;
     const TILE_PAD = 10;
     const MAX_IMAGE_PIXELS = 1_500_000;
+    const MAX_QUEUE_SIZE = 5;
     const input = document.getElementById("file-input");
     const dropZone = document.getElementById("drop-zone");
     const originalImage = document.getElementById("original-image");
@@ -180,10 +202,9 @@
     const restoreButton = document.getElementById("restore");
     const status = document.getElementById("status");
     const download = document.getElementById("download");
-    let selectedBitmap = null;
-    let selectedFilename = "photo";
-    let selectedUrl = null;
-    let resultUrl = null;
+    const photos = [];
+    let activePhotoId = null;
+    let processing = false;
     let sessionPromise = null;
 
     function setStatus(message, kind = "") {
@@ -195,50 +216,190 @@
       target.textContent = `${image.naturalWidth.toLocaleString()} × ${image.naturalHeight.toLocaleString()} px`;
     }
 
-    function resetResult() {
-      resultImage.hidden = true;
-      document.getElementById("result-placeholder").hidden = false;
-      document.getElementById("result-size").textContent = "Your finished image";
-      document.getElementById("result-info").textContent = "Your original is never changed. Download the result as a high-resolution PNG.";
-      download.hidden = true;
-      if (resultUrl) {
-        URL.revokeObjectURL(resultUrl);
-        resultUrl = null;
+    function activePhoto() {
+      return photos.find(photo => photo.id === activePhotoId) || null;
+    }
+
+    function updateRestoreButton() {
+      const pending = photos.filter(photo => photo.status === "queued").length;
+      restoreButton.disabled = processing || pending === 0;
+      document.getElementById("button-label").textContent = processing
+        ? "Restoring photographs…"
+        : pending
+          ? `Restore ${pending} photo${pending === 1 ? "" : "s"}`
+          : photos.length
+            ? "All photos restored"
+            : "Choose photos to begin";
+    }
+
+    function showPhoto(photo) {
+      activePhotoId = photo?.id ?? null;
+      if (!photo) {
+        originalImage.hidden = true;
+        document.getElementById("original-placeholder").hidden = false;
+        document.getElementById("original-size").textContent = "Waiting for image";
+        resultImage.hidden = true;
+        document.getElementById("result-placeholder").hidden = false;
+        document.getElementById("result-size").textContent = "Your finished image";
+        document.getElementById("result-info").textContent = "Your original is never changed. Download the result as a high-resolution PNG.";
+        download.hidden = true;
+        return;
+      }
+
+      originalImage.src = photo.originalUrl;
+      originalImage.hidden = false;
+      document.getElementById("original-placeholder").hidden = true;
+      document.getElementById("original-size").textContent = `${photo.width.toLocaleString()} × ${photo.height.toLocaleString()} px`;
+      if (photo.resultUrl) {
+        resultImage.src = photo.resultUrl;
+        resultImage.hidden = false;
+        document.getElementById("result-placeholder").hidden = true;
+        document.getElementById("result-size").textContent = `${(photo.width * SCALE).toLocaleString()} × ${(photo.height * SCALE).toLocaleString()} px`;
+        document.getElementById("result-info").textContent = "Your original is unchanged. This browser demo upscales; it cannot reliably remove severe motion blur.";
+        download.href = photo.resultUrl;
+        download.download = photo.downloadName;
+        download.hidden = false;
+      } else {
+        resultImage.hidden = true;
+        document.getElementById("result-placeholder").hidden = false;
+        document.getElementById("result-size").textContent = "Your finished image";
+        document.getElementById("result-info").textContent = "This photo has not been restored yet.";
+        download.hidden = true;
       }
     }
 
-    async function chooseFile(file) {
-      if (!file) return;
-      if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-        setStatus("Please choose a JPG, PNG or WEBP image.", "error");
-        return;
+    function renderQueue() {
+      const queue = document.getElementById("queue");
+      const list = document.getElementById("queue-list");
+      list.replaceChildren();
+      queue.hidden = photos.length === 0;
+      document.getElementById("queue-title").textContent = `${photos.length} photo${photos.length === 1 ? "" : "s"} in queue`;
+      document.getElementById("queue-clear").disabled = processing;
+
+      for (const photo of photos) {
+        const row = document.createElement("div");
+        row.className = "queue-item";
+        const thumbnail = document.createElement("img");
+        thumbnail.className = "queue-thumb";
+        thumbnail.src = photo.resultUrl || photo.originalUrl;
+        thumbnail.alt = "";
+        const metadata = document.createElement("div");
+        metadata.className = "queue-meta";
+        const name = document.createElement("div");
+        name.className = "queue-name";
+        name.textContent = photo.file.name;
+        const state = document.createElement("div");
+        state.className = `queue-state${photo.status === "done" ? " success" : photo.status === "error" ? " error" : ""}`;
+        state.textContent = photo.status === "done" ? "Restored · 4× PNG ready"
+          : photo.status === "error" ? photo.error
+            : photo.status === "processing" ? "Restoring…"
+              : `${photo.width.toLocaleString()} × ${photo.height.toLocaleString()} px · waiting`;
+        metadata.append(name, state);
+        row.append(thumbnail, metadata);
+
+        const viewButton = document.createElement("button");
+        viewButton.className = "queue-action";
+        viewButton.type = "button";
+        viewButton.textContent = "View";
+        viewButton.disabled = processing;
+        viewButton.setAttribute("aria-label", `View ${photo.file.name}`);
+        viewButton.addEventListener("click", () => {
+          showPhoto(photo);
+          setStatus(photo.status === "done" ? `${photo.file.name} is ready to download.` : `Selected ${photo.file.name}.`, photo.status === "done" ? "success" : "");
+        });
+        row.append(viewButton);
+
+        if (photo.resultUrl) {
+          const saveLink = document.createElement("a");
+          saveLink.className = "queue-action";
+          saveLink.href = photo.resultUrl;
+          saveLink.download = photo.downloadName;
+          saveLink.textContent = "Save PNG";
+          saveLink.setAttribute("aria-label", `Download restored ${photo.file.name}`);
+          row.append(saveLink);
+        }
+
+        const removeButton = document.createElement("button");
+        removeButton.className = "queue-action";
+        removeButton.type = "button";
+        removeButton.textContent = "Remove";
+        removeButton.disabled = processing;
+        removeButton.setAttribute("aria-label", `Remove ${photo.file.name}`);
+        removeButton.addEventListener("click", () => removePhoto(photo.id));
+        row.append(removeButton);
+        list.append(row);
       }
-      let bitmap;
-      try {
-        bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-      } catch (error) {
-        setStatus(`Could not open this image: ${error.message}`, "error");
-        return;
+      updateRestoreButton();
+    }
+
+    function removePhoto(photoId) {
+      if (processing) return;
+      const index = photos.findIndex(photo => photo.id === photoId);
+      if (index < 0) return;
+      const [photo] = photos.splice(index, 1);
+      photo.bitmap?.close();
+      URL.revokeObjectURL(photo.originalUrl);
+      if (photo.resultUrl) URL.revokeObjectURL(photo.resultUrl);
+      if (activePhotoId === photoId) showPhoto(photos[Math.min(index, photos.length - 1)] || null);
+      renderQueue();
+      setStatus(photos.length ? "Photo removed from the queue." : "Choose one or more photos to prepare your restoration.");
+    }
+
+    async function addFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      const errors = [];
+      let added = 0;
+      for (const file of files) {
+        if (photos.length >= MAX_QUEUE_SIZE) {
+          errors.push(`Queue limit reached (${MAX_QUEUE_SIZE} photos). Remove finished photos to add more.`);
+          break;
+        }
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+          errors.push(`${file.name}: choose a JPG, PNG, or WEBP image.`);
+          continue;
+        }
+        if (photos.some(photo => photo.file.name === file.name && photo.file.size === file.size && photo.file.lastModified === file.lastModified)) {
+          continue;
+        }
+        let bitmap;
+        try {
+          bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+        } catch (error) {
+          errors.push(`${file.name}: could not open this image.`);
+          continue;
+        }
+        if (bitmap.width * bitmap.height > MAX_IMAGE_PIXELS) {
+          bitmap.close();
+          errors.push(`${file.name}: choose a photo under 1.5 megapixels for reliable browser processing.`);
+          continue;
+        }
+        const safeStem = file.name.replace(/\.[^.]+$/, "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "-") || "photo";
+        photos.push({
+          id: `${Date.now()}-${added}-${Math.random().toString(36).slice(2)}`,
+          file,
+          bitmap,
+          width: bitmap.width,
+          height: bitmap.height,
+          originalUrl: URL.createObjectURL(file),
+          resultUrl: null,
+          downloadName: `${safeStem}-restored.png`,
+          status: "queued",
+          error: ""
+        });
+        added++;
       }
-      if (bitmap.width * bitmap.height > MAX_IMAGE_PIXELS) {
-        bitmap.close();
-        setStatus("This photo is very large. Please choose an image under 1.5 megapixels for reliable browser processing.", "error");
-        return;
+      document.getElementById("upload-name").textContent = photos.length
+        ? `${photos.length} photo${photos.length === 1 ? "" : "s"} selected`
+        : "Choose photos or drop them here";
+      if (added) {
+        showPhoto(photos[photos.length - 1]);
+        setStatus(`${added} photo${added === 1 ? "" : "s"} added. ${photos.filter(photo => photo.status === "queued").length} ready to restore.`);
+      } else if (!errors.length) {
+        setStatus("Those photos are already in the queue.");
       }
-      if (selectedBitmap) selectedBitmap.close();
-      selectedBitmap = bitmap;
-      selectedFilename = file.name.replace(/\.[^.]+$/, "") || "photo";
-      if (selectedUrl) URL.revokeObjectURL(selectedUrl);
-      selectedUrl = URL.createObjectURL(file);
-      originalImage.src = selectedUrl;
-      originalImage.hidden = false;
-      document.getElementById("original-placeholder").hidden = true;
-      document.getElementById("original-size").textContent = `${bitmap.width.toLocaleString()} × ${bitmap.height.toLocaleString()} px`;
-      document.getElementById("upload-name").textContent = file.name;
-      restoreButton.disabled = false;
-      document.getElementById("button-label").textContent = "Restore my photograph";
-      resetResult();
-      setStatus("Image ready. This demo upscales; it cannot reliably remove severe motion blur.");
+      renderQueue();
+      if (errors.length) setStatus(errors.join(" "), "error");
     }
 
     async function loadModel() {
@@ -388,7 +549,10 @@
       return original;
     }
 
-    input.addEventListener("change", () => chooseFile(input.files[0]));
+    input.addEventListener("change", () => {
+      addFiles(input.files);
+      input.value = "";
+    });
     for (const eventName of ["dragenter", "dragover"]) {
       dropZone.addEventListener(eventName, event => {
         event.preventDefault();
@@ -401,49 +565,83 @@
         dropZone.classList.remove("over");
       });
     }
-    dropZone.addEventListener("drop", event => chooseFile(event.dataTransfer.files[0]));
+    dropZone.addEventListener("drop", event => addFiles(event.dataTransfer.files));
     document.getElementById("strength").addEventListener("input", event => {
       document.getElementById("strength-value").textContent = `${event.target.value}%`;
     });
     document.getElementById("fidelity").addEventListener("input", event => {
       document.getElementById("fidelity-value").textContent = `${event.target.value}%`;
     });
+    document.getElementById("queue-clear").addEventListener("click", () => {
+      if (processing) return;
+      for (const photo of photos) {
+        photo.bitmap?.close();
+        URL.revokeObjectURL(photo.originalUrl);
+        if (photo.resultUrl) URL.revokeObjectURL(photo.resultUrl);
+      }
+      photos.length = 0;
+      document.getElementById("upload-name").textContent = "Choose photos or drop them here";
+      showPhoto(null);
+      renderQueue();
+      setStatus("Photo queue cleared. Choose more photos whenever you're ready.");
+    });
 
     restoreButton.addEventListener("click", async () => {
-      if (!selectedBitmap) return;
+      const pending = photos.filter(photo => photo.status === "queued");
+      if (!pending.length || processing) return;
       const blendPercent = Number(document.getElementById("strength").value);
       const fidelityPercent = Number(document.getElementById("fidelity").value);
-      restoreButton.disabled = true;
-      document.getElementById("button-label").textContent = "Restoring photograph…";
-      setStatus("Preparing a high-resolution version of your photo…");
-      try {
-        const result = await restorePhoto(selectedBitmap, blendPercent, fidelityPercent);
-        const canvas = document.createElement("canvas");
-        canvas.width = selectedBitmap.width * SCALE;
-        canvas.height = selectedBitmap.height * SCALE;
-        canvas.getContext("2d").putImageData(result, 0, 0);
-        const blob = await new Promise((resolve, reject) => {
-          canvas.toBlob(value => value ? resolve(value) : reject(new Error("Could not encode the restored image.")), "image/png");
-        });
-        if (resultUrl) URL.revokeObjectURL(resultUrl);
-        resultUrl = URL.createObjectURL(blob);
-        resultImage.src = resultUrl;
-        resultImage.hidden = false;
-        document.getElementById("result-placeholder").hidden = true;
-        document.getElementById("result-size").textContent = `${canvas.width.toLocaleString()} × ${canvas.height.toLocaleString()} px`;
-        download.href = resultUrl;
-        download.download = `${selectedFilename}-restored.png`;
-        download.hidden = false;
-        document.getElementById("result-info").textContent = blendPercent === 0
-          ? "Original-only 4× upscale · no AI-generated detail"
-          : `${blendPercent}% AI upscale blend · ${fidelityPercent}% source preservation`;
-        setStatus("Your restored photo is ready to download.", "success");
-      } catch (error) {
-        console.error(error);
-        setStatus(error.message || "Could not restore this photo. Please try again.", "error");
-      } finally {
-        restoreButton.disabled = !selectedBitmap;
-        document.getElementById("button-label").textContent = "Restore my photograph";
+      processing = true;
+      updateRestoreButton();
+      renderQueue();
+      let completed = 0;
+      const failures = [];
+      for (const photo of pending) {
+        photo.status = "processing";
+        showPhoto(photo);
+        renderQueue();
+        setStatus(`Restoring photo ${completed + 1} of ${pending.length}: ${photo.file.name}`);
+        try {
+          const result = await restorePhoto(photo.bitmap, blendPercent, fidelityPercent);
+          const canvas = document.createElement("canvas");
+          canvas.width = photo.width * SCALE;
+          canvas.height = photo.height * SCALE;
+          canvas.getContext("2d").putImageData(result, 0, 0);
+          const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob(value => value ? resolve(value) : reject(new Error("Could not encode the restored image.")), "image/png");
+          });
+          photo.resultUrl = URL.createObjectURL(blob);
+          photo.status = "done";
+          photo.bitmap.close();
+          photo.bitmap = null;
+          showPhoto(photo);
+          completed++;
+          setStatus(`${completed} of ${pending.length} photos restored.`, "success");
+        } catch (error) {
+          console.error(`Could not restore ${photo.file.name}`, error);
+          photo.status = "error";
+          photo.error = error.message || "Could not restore this photo.";
+          failures.push(photo.file.name);
+          setStatus(`${photo.file.name}: ${photo.error}`, "error");
+        }
+        renderQueue();
+      }
+      processing = false;
+      updateRestoreButton();
+      renderQueue();
+      const done = photos.filter(photo => photo.status === "done").length;
+      if (failures.length) {
+        setStatus(`${done} photo${done === 1 ? "" : "s"} restored; ${failures.length} failed. Remove failed items and retry if appropriate.`, "error");
+      } else {
+        setStatus(`${completed} photo${completed === 1 ? "" : "s"} restored. Select any queue item to preview or download it.`, "success");
+      }
+    });
+
+    window.addEventListener("beforeunload", () => {
+      for (const photo of photos) {
+        photo.bitmap?.close();
+        URL.revokeObjectURL(photo.originalUrl);
+        if (photo.resultUrl) URL.revokeObjectURL(photo.resultUrl);
       }
     });
   </script>
