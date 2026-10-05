@@ -101,7 +101,7 @@
       <section class="intro">
         <div class="eyebrow">A second life for your photographs</div>
         <h1>Bring the details <span>back.</span></h1>
-        <p>Upscale an old or soft photograph with Real-ESRGAN. Your original stays untouched; choose how much AI detail to blend into your result.</p>
+        <p>Upscale an old or soft photograph with Real-ESRGAN. Your original stays untouched; choose how much AI-estimated detail to add.</p>
       </section>
       <section class="workspace" aria-label="Photo restoration workspace">
         <div class="panel">
@@ -134,15 +134,15 @@
           <div class="panel-head"><div class="panel-title">Restoration settings</div><div class="muted">Fine tune</div></div>
           <div class="settings">
             <div class="setting">
-              <div class="setting-top"><label class="setting-label" for="strength">AI detail blend</label><output id="strength-value" for="strength">25%</output></div>
-              <div class="hint">At 0%, only conventional upscaling is used. Increase gradually to blend in AI-estimated detail.</div>
-              <input id="strength" type="range" min="0" max="100" value="25">
+              <div class="setting-top"><label class="setting-label" for="strength">AI detail blend</label><output id="strength-value" for="strength">100%</output></div>
+              <div class="hint">Set high for a visibly stronger result. AI estimates missing texture; it cannot know the exact details lost to blur.</div>
+              <input id="strength" type="range" min="0" max="100" value="100">
               <div class="range-labels"><span>Original-only upscale</span><span>More AI detail</span></div>
             </div>
             <div class="setting">
-              <div class="setting-top"><label class="setting-label" for="fidelity">Original fidelity</label><output id="fidelity-value" for="fidelity">98%</output></div>
-              <div class="hint">Limits how far AI can change each pixel's color from the original upscale. Higher fidelity keeps your photo closer to its source.</div>
-              <input id="fidelity" type="range" min="0" max="100" value="98">
+              <div class="setting-top"><label class="setting-label" for="fidelity">Source preservation</label><output id="fidelity-value" for="fidelity">45%</output></div>
+              <div class="hint">Higher preservation tightly limits AI changes and can leave a blurry photo looking almost unchanged. For stronger detail, start around 35–55%.</div>
+              <input id="fidelity" type="range" min="0" max="100" value="45">
               <div class="range-labels"><span>More AI variation</span><span>Faithful</span></div>
             </div>
             <div class="divider"></div>
@@ -427,7 +427,7 @@
         download.hidden = false;
         document.getElementById("result-info").textContent = blendPercent === 0
           ? "Original-only upscale · no AI-generated detail"
-          : `${blendPercent}% AI blend · ${fidelityPercent}% original fidelity`;
+          : `${blendPercent}% AI detail · ${fidelityPercent}% source preservation`;
         setStatus("Your restored photo is ready to download.", "success");
       } catch (error) {
         console.error(error);

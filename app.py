@@ -158,27 +158,6 @@ def calculate_blur_score(image: np.ndarray) -> float:
     return float(score)
 
 
-def calculate_safe_strength(
-    requested_strength: float,
-    blur_score: float,
-) -> float:
-    """
-    Prevent aggressive face restoration on extremely
-    blurry images.
-    """
-
-    if blur_score < 20:
-        return min(requested_strength, 0.25)
-
-    if blur_score < 50:
-        return min(requested_strength, 0.40)
-
-    if blur_score < 100:
-        return min(requested_strength, 0.60)
-
-    return requested_strength
-
-
 # ============================================================
 # CODEFORMER
 # ============================================================
@@ -243,10 +222,7 @@ def process_image(
 
     blur_score = calculate_blur_score(image)
 
-    applied_strength = calculate_safe_strength(
-        strength,
-        blur_score,
-    )
+    applied_strength = strength
 
     # --------------------------------------------------------
     # Real-ESRGAN
@@ -418,12 +394,12 @@ async def health():
 async def enhance_image(
     file: UploadFile = File(...),
     fidelity: float = Form(
-        0.85,
+        0.45,
         ge=0.0,
         le=1.0,
     ),
     strength: float = Form(
-        0.6,
+        1.0,
         ge=0.0,
         le=1.0,
     ),
@@ -734,19 +710,19 @@ STUDIO_HTML = r"""<!doctype html>
             <div class="setting">
               <div class="setting-top">
                 <label class="setting-label" for="strength">AI detail blend</label>
-                <output class="setting-value" id="strength-value" for="strength">25%</output>
+                <output class="setting-value" id="strength-value" for="strength">100%</output>
               </div>
-              <div class="setting-hint">At 0%, only the original is conventionally upscaled. Increase gradually to blend in AI-estimated detail.</div>
-              <input id="strength" type="range" min="0" max="100" value="25">
+              <div class="setting-hint">Set high for a visibly stronger result. AI estimates missing texture; it cannot know the exact details lost to blur.</div>
+              <input id="strength" type="range" min="0" max="100" value="100">
               <div class="scale-labels"><span>Original-only upscale</span><span>More AI detail</span></div>
             </div>
             <div class="setting">
               <div class="setting-top">
-                <label class="setting-label" for="fidelity">Original fidelity</label>
-                <output class="setting-value" id="fidelity-value" for="fidelity">98%</output>
+                <label class="setting-label" for="fidelity">Source preservation</label>
+                <output class="setting-value" id="fidelity-value" for="fidelity">45%</output>
               </div>
-              <div class="setting-hint">Higher fidelity asks face restoration to stay closer to the original features.</div>
-              <input id="fidelity" type="range" min="0" max="100" value="98">
+              <div class="setting-hint">Higher preservation keeps AI changes very small and can leave a blurry photo unchanged. Start around 35–55% for stronger detail.</div>
+              <input id="fidelity" type="range" min="0" max="100" value="45">
               <div class="scale-labels"><span>Creative</span><span>Faithful</span></div>
             </div>
             <div class="divider"></div>
