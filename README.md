@@ -16,12 +16,12 @@ Face reconstruction is opt-in because it can invent facial details.
 Restormer is trained on benchmark motion blur and may perform poorly on real
 phone blur; it cannot reliably recover severe blur. Generative face restoration
 can produce plausible details, not evidence of the exact original appearance.
-The public Hugging Face Space remains a browser-only Real-ESRGAN upscaler and
-does not run this server pipeline.
+The public Hugging Face Space is a browser-only Real-ESRGAN upscaler and does
+not run this local FastAPI pipeline.
 
 ## Open the public demo
 
-Open <https://huggingface.co/spaces/Abusiddiq/sidd>. The first AI upscale
+Open <https://huggingface.co/spaces/Abusiddiq/1415>. The first AI upscale
 downloads the approximately 64 MB ONNX model into the browser cache; WebGPU is
 used when supported, otherwise the app falls back to WebAssembly.
 The browser demo accepts up to five images per batch through the file picker
